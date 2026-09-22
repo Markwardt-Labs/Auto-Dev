@@ -13,6 +13,15 @@
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- SelfContained (below) being Release-only means Debug and Release genuinely restore different package
+         sets - Release implicitly pulls in Microsoft.NET.ILLink.Tasks for trimming, Debug never does - so one
+         shared packages.lock.json can never simultaneously satisfy a strict `RestoreLockedMode=true` restore
+         (see build.yml's own Build/publish steps, which both use it) in both configurations: whichever one
+         didn't generate the lock file last fails with NU1004 ("package references have changed"), regardless
+         of whether anything actually needs updating. A separate lock file per configuration - each internally
+         consistent for its own restore graph - is what NuGet itself supports for exactly this case, and is a
+         real, structural fix rather than just moving the failure from one CI step to the other. -->
+    <NuGetLockFilePath Condition="'$(Configuration)' == 'Release'">packages.release.lock.json</NuGetLockFilePath>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <!-- Windows PE resource icon (taskbar/explorer); ignored harmlessly on non-Windows builds. -->

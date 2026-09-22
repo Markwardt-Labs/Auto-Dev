@@ -11,7 +11,7 @@
 ## Coding
 
 - File-scoped namespaces everywhere.
-- Each project restores with a committed `packages.lock.json` (`RestorePackagesWithLockFile`). After changing a `PackageReference`, run `dotnet restore` to keep the lock file in sync.
+- Each project restores with a committed `packages.lock.json` (`RestorePackagesWithLockFile`). After changing a `PackageReference`, run `dotnet restore` to keep the lock file in sync. `App` has a second, Release-only `packages.release.lock.json` (`NuGetLockFilePath`) alongside it - its own package set genuinely differs from Debug's (self-contained/trimming is Release-only, pulling in `Microsoft.NET.ILLink.Tasks`), so keeping them in sync after a `PackageReference` change means restoring both configurations: `dotnet restore App/App.csproj` (Debug) and `dotnet restore App/App.csproj -p:Configuration=Release` (Release).
 - No comments unless the why is non-obvious - a hidden constraint, a platform quirk, a non-obvious invariant. Never comment what the code obviously does. No multi-line comment blocks, and no comments used to designate sections of members (e.g. `// ── Section ──` dividers) - order members by the rule below instead.
 - All types and members (`public` and `internal`) require full XML documentation comments (`<summary>`, `<param>`, `<returns>`, `<exception>`, etc. as applicable). Use `<inheritdoc />` on members that implement a documented interface without adding meaningful additional documentation.
 - `sealed` on all classes that are not designed for inheritance.

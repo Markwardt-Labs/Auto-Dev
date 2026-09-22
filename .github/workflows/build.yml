@@ -30,10 +30,13 @@ jobs:
         with:
           dotnet-version: "10.0.x"
           cache: true
-          cache-dependency-path: "**/packages.lock.json"
+          cache-dependency-path: "**/packages*.lock.json"
 
-      # RestoreLockedMode fails fast if packages.lock.json (also what the setup-dotnet cache key above is
-      # keyed on) doesn't match what the project references, instead of silently re-resolving and drifting.
+      # RestoreLockedMode fails fast if a project's own lock file (also what the setup-dotnet cache key above
+      # is keyed on) doesn't match what the project references for the configuration being restored, instead
+      # of silently re-resolving and drifting. This step runs Debug, restoring App/packages.lock.json - the
+      # publish job below runs Release, restoring the separate App/packages.release.lock.json instead (see
+      # App.csproj's own NuGetLockFilePath comment for why one shared lock file can't serve both).
       - name: Build
         run: dotnet build -p:RestoreLockedMode=true
 
@@ -80,7 +83,7 @@ jobs:
         with:
           dotnet-version: "10.0.x"
           cache: true
-          cache-dependency-path: "**/packages.lock.json"
+          cache-dependency-path: "**/packages*.lock.json"
 
       # App/App.csproj carries no <Version> of its own - the version always comes from the "version" input to
       # this workflow, and this step fails the run rather than falling back to any default if it's missing

@@ -44,9 +44,13 @@ mutating it at a time, and the others lock accordingly for as long as it runs.
 
 ## Templates
 
-A registered template (a single Markdown file describing a target layout/configuration) can be
-applied to any open workspace, empty or not, from the title bar's Templates popup. Applying one
-submits a real Generate request instructing the AI to scaffold (an empty workspace) or restructure
-(a non-empty one) the workspace to conform - it progresses through the Generate tab exactly like a
-typed message, and leaves the result as ordinary pending changes for the user to review and commit,
-the same as any other AI-driven turn.
+A template (a single Markdown file describing a target layout/configuration) can be applied to any
+open workspace, empty or not, from the title bar's Templates popup - which lists every `.md` file
+directly inside AutoDev's own Templates folder (the folder itself is the whole registry; "Open
+Templates" opens it in the file manager to add/remove one). Applying a template tells the AI to
+read that file itself (by its own absolute path, alongside a pointer to the Templates folder in
+case it needs to look up another one the first inherits from) rather than pasting its content into
+the prompt, then scaffold (an empty workspace) or restructure (a non-empty one) the workspace to
+conform - it progresses through the Generate tab exactly like a typed message, and leaves the
+result as ordinary pending changes for the user to review and commit, the same as any other
+AI-driven turn.

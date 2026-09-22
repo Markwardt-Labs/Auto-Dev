@@ -24,13 +24,24 @@ means launching a whole new AutoDev process
 All of these funnel through one private tail:
 
 ```csharp
-private async Task OpenWorkspaceAsync(string path)
+private async Task OpenWorkspaceAsync(string path, bool forceReload = false)
 {
     var workspace = await _workspaceService.OpenOrCreateAsync(path);
-    WorkspaceOpened?.Invoke(workspace);
+    WorkspaceOpened?.Invoke((workspace, forceReload));
     await RefreshRecentWorkspacesAsync();
 }
 ```
+
+`MainShellViewModel.OnWorkspaceOpened` skips rebuilding the `WorkspaceViewModel` entirely when the
+new path matches whatever's already open - a deliberate optimization (re-selecting the same,
+still-valid, already-open workspace shouldn't tear down and lose in-progress state like an active AI
+turn) - *unless* `forceReload` is set, which only `CloneAsync` ever passes `true`. A clone's own
+destination-collision check already guarantees that path didn't exist a moment ago, so a same-path
+clone can only mean the workspace previously open there was deleted outside AutoDev and this is
+genuinely fresh content, not a re-open of the same one - without `forceReload`, the app kept showing
+the stale, pre-deletion `WorkspaceViewModel` indefinitely (file tree, git status, and
+`VersionSectionViewModel.EnsureRepoAsync`'s own empty-workspace template offer all stuck reflecting
+whatever was there before, never re-running against the new clone's actual content).
 
 `IWorkspaceService.OpenOrCreateAsync` (`src/Core/Services/WorkspaceService.cs`) resolves the full path,
 `Directory.CreateDirectory`s it if needed, calls `IWorkspaceMetadataStore.EnsureInitialized` (creates

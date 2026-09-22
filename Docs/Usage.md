@@ -33,9 +33,12 @@ everything exactly as a failed attempt found it if it still can't recover.
 
 ## Apply a template
 
-Open the title bar's Templates popup, register a template file (any Markdown file describing a
-target layout/configuration) if it isn't already, and click its Apply button. This submits a
-Generate request - visible in the Generate tab like any other - instructing the AI to scaffold an
-empty workspace's initial structure, or restructure an already-populated one to conform, moving/
-renaming/rewriting whatever's there as needed rather than only adding alongside it. The result is
-left as ordinary pending changes to review before committing, exactly like a typed request would be.
+Open the title bar's Templates popup - it lists every `.md` file already sitting directly inside
+AutoDev's own Templates folder. To add or remove one, click "Open Templates" to open that folder in
+the file manager and drop a Markdown file (describing a target layout/configuration) in or out
+directly, then reopen the popup. Click a template's Apply button to submit a Generate request -
+visible in the Generate tab like any other - instructing the AI to read that template file itself
+and scaffold an empty workspace's initial structure, or restructure an already-populated one to
+conform, moving/renaming/rewriting whatever's there as needed rather than only adding alongside it.
+The result is left as ordinary pending changes to review before committing, exactly like a typed
+request would be.

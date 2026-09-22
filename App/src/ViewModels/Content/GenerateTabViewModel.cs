@@ -668,6 +668,15 @@ public sealed partial class GenerateTabViewModel : ViewModelBase, IAsyncDisposab
         // just as well with no special prefix needed at all. IsSending/NormalTurnStarted only apply to a
         // turn's first message; the client is already live, so EnsureClientStarted is skipped.
         bool isInterjection = IsSending;
+
+        // Sent while the active request sits Paused: folds into that same request exactly like an
+        // interjection does, rather than starting an unrelated new one and leaving this one paused forever
+        // (CanSend doesn't gate on IsSending/Status at all, so Send stays clickable while paused) - the whole
+        // point of a request card is one continuous conversation, and there's no live client to interject
+        // into anyway. Resumes it via the same mechanics as ResumeAsync (EnsureClientStarted against the
+        // captured resumeSessionId), but sends this real text as the resume message instead of ResumeAsync's
+        // own generic "Continue from where you left off." placeholder.
+        bool isPausedResume = !isInterjection && activeRequest is { IsPaused: true };
         string outgoingText = textWithFileReferences;
 
         if (isInterjection)
@@ -679,6 +688,19 @@ public sealed partial class GenerateTabViewModel : ViewModelBase, IAsyncDisposab
                 _ = PersistCurrentRequestsAsync();
                 DisplayedIndex = Requests.Count - 1;
             }
+        }
+        else if (isPausedResume)
+        {
+            activeRequest!.Input = $"{activeRequest.Input}\n{textWithFileReferences}";
+            activeRequest.Status = GenerateRequestStatus.Working;
+            activeRequest.CurrentActionStartedAt = DateTimeOffset.UtcNow;
+            pendingTurnCount = 1;
+            _ = PersistCurrentRequestsAsync();
+            DisplayedIndex = Requests.Count - 1;
+
+            IsSending = true;
+            TurnResumed?.Invoke();
+            EnsureClientStarted();
         }
         else
         {

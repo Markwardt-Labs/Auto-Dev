@@ -35,6 +35,7 @@ public sealed class WorkspaceFactory(
     IExternalOpenService externalOpenService,
     IClipboardService clipboardService,
     ICommandExecutor commandExecutor,
+    ITemplateService templateService,
     ILoggerFactory loggerFactory) : IWorkspaceFactory
 {
     public WorkspaceViewModel Create(WorkspaceInfo workspace)
@@ -53,7 +54,7 @@ public sealed class WorkspaceFactory(
             soundService,
             dispatcher,
             loggerFactory.CreateLogger<GenerateTabViewModel>());
-        VersionSectionViewModel version = new VersionSectionViewModel(versioningService, dialogService, generate, dispatcher);
+        VersionSectionViewModel version = new VersionSectionViewModel(versioningService, dialogService, templateService, generate, dispatcher);
         HistoryTabViewModel history = new HistoryTabViewModel(versioningService, version, dialogService, edit);
         ScriptTabViewModel script = new ScriptTabViewModel(workspace.FullPath, metadataStore, scriptRunner, clipboardService, dispatcher);
         CommandTabViewModel command = new CommandTabViewModel(workspace.FullPath, commandExecutor, dispatcher);

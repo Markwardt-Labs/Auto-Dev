@@ -47,6 +47,25 @@ regex-based parser on the UI thread, which could take long enough to look exactl
 app had hung. The size/binary gate above exists specifically so that can't happen again, for any
 file type, regardless of extension.
 
+## Syntax highlighting (`UpdateLanguage`, TextMate)
+
+`EditTabView.axaml.cs`'s `OnFileLoaded` swaps in the file's `TextDocument` first, then calls
+`UpdateLanguage()` (which resolves the extension to a TextMate grammar and calls
+`TextMate.Installation.SetGrammar`) - not the other way around, since `SetGrammar`'s own initial
+tokenize/redraw pass runs against whatever document is *currently* attached, and calling it before
+the swap tokenized the outgoing file's now-detached document instead of the new one.
+
+That alone still isn't quite enough: `SetGrammar`'s own redraw can land before the editor's
+`TextView` has actually been measured/attached to the visual tree - freshly opening a workspace tab
+calls this the moment `DataContext` is set, potentially mid-layout - in which case there are no
+visual lines yet for it to invalidate, and nothing else ever prompts a further redraw once layout
+does happen. This showed up as a file sometimes opening with no (or only partial) highlighting,
+fixed by switching to a different file and back - which succeeds because by then the file's own
+`TextDocument`/tokenization has already settled, and reattaching it triggers a fresh, complete
+redraw. `OnFileLoaded` now also posts one extra `TextView.Redraw()` at `Loaded` priority (after that
+pass completes) as a fallback - the same fix already used for embedded markdown code-block editors
+below, for the identical "freshly attached TextEditor renders before it's tokenized" race.
+
 ## Markdown rendering and Mermaid diagrams
 
 `RenderedContent` is only ever populated for an actual markdown file (`IsMarkdown`, i.e. a `.md`
@@ -88,6 +107,19 @@ Claude reply.
 
 `Edit.IsReadOnly` is driven from outside this view model entirely - targeting a tag/commit, an
 in-progress version action, or an active Claude turn all lock editing.
+
+## Text drag-and-drop is disabled
+
+Every `AvaloniaEdit.TextEditor` this app creates - the main `Editor`, and each per-fenced-block
+`TextEditor` a rendered code span uses (`EditTabView`/`GenerateTabView`'s own
+`ApplyMarkdownCodeColors`) - has `Options.EnableTextDragDrop` set `false`. AvaloniaEdit's own
+built-in "drag an already-selected block of text to move it" gesture starts a native OS
+drag-and-drop (`DragDrop.DoDragDropAsync`, awaited on the UI thread) the moment that drag moves far
+enough; dragging it past the editor's own bounds (further still, past the window's) hits a known
+Avalonia X11 pointer-capture bug where the drag session never resolves - the await never completes,
+freezing the whole app's UI thread permanently, not just this control. No editing workflow here
+depends on drag-to-move (cut/paste covers the same need), so the gesture is removed entirely rather
+than attempting to work around Avalonia's own X11 drag-and-drop bug from application code.
 
 ## Find in file
 

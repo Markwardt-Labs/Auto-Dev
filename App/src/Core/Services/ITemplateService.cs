@@ -2,20 +2,12 @@ using AutoDev.Core.Models;
 
 namespace AutoDev.Core.Services;
 
-/// <summary>Registry of workspace-scaffolding templates - plain `.md` files elsewhere on disk that describe how a workspace should be organized/configured (see TemplatesDialogViewModel). Only the registry (which paths are registered) is persisted; a template's own content is always read fresh at the moment it's applied, never cached, so editing the file takes effect immediately.</summary>
+/// <summary>Scaffolding templates - plain `.md` files, each describing how a workspace should be organized/configured, that live directly inside GetTemplatesDirectory() (see TemplatesDialogViewModel). The directory itself is the whole registry: adding or removing a template is just adding or removing a file there (e.g. via the Templates dialog's "Open Templates" button), not a separate register/unregister step. A template's own content is never read by this app at all - the AI reads it itself, from its own Path, at the moment it's applied (see VersionSectionViewModel.BuildTemplateInstruction), so editing the file takes effect immediately with nothing to go stale.</summary>
 public interface ITemplateService
 {
-    /// <summary>Every registered template, filtered to files that still exist - same Directory.Exists-style filtering IWorkspaceService.GetRecentWorkspacesAsync already applies to its own list.</summary>
-    Task<IReadOnlyList<WorkspaceTemplate>> GetRegisteredTemplatesAsync(CancellationToken cancellationToken = default);
+    /// <summary>Every `.md` file directly inside GetTemplatesDirectory(), alphabetical by name - plain directory enumeration, same as IFileTreeService.GetChildren, so no Task wrapper for what's never really asynchronous work.</summary>
+    IReadOnlyList<WorkspaceTemplate> GetTemplates();
 
-    /// <summary>Registers `path` if it isn't already registered - a no-op otherwise.</summary>
-    Task RegisterTemplateAsync(string path, CancellationToken cancellationToken = default);
-
-    Task UnregisterTemplateAsync(string path, CancellationToken cancellationToken = default);
-
-    /// <summary>Reads `path` fresh from disk - deliberately never cached, so a template edited after being registered is picked up the very next time it's applied.</summary>
-    Task<string> ReadTemplateContentAsync(string path, CancellationToken cancellationToken = default);
-
-    /// <summary>Where the "Add Template" file picker starts browsing by default - `Templates` under AutoDev's own app data folder, created if it doesn't exist yet. Templates aren't required to live here; this is just a convenient default location, the same idea as IWorkspaceService.GetLastParentFolderAsync for the workspace folder picker.</summary>
-    string GetDefaultTemplatesDirectory();
+    /// <summary>Where every template lives - `Templates` under AutoDev's own app data folder, created if it doesn't exist yet.</summary>
+    string GetTemplatesDirectory();
 }

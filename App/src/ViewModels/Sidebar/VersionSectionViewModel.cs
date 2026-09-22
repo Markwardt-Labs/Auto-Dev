@@ -26,6 +26,7 @@ public sealed partial class VersionSectionViewModel : ViewModelBase, IDisposable
 
     private readonly IWorkspaceVersioningService versioningService;
     private readonly IDialogService dialogService;
+    private readonly ITemplateService templateService;
     private readonly GenerateTabViewModel generate;
     private readonly IUiDispatcher dispatcher;
     private readonly System.Timers.Timer periodicSyncTimer;
@@ -38,10 +39,11 @@ public sealed partial class VersionSectionViewModel : ViewModelBase, IDisposable
     /// <summary>Set only once the current busy action has failed (see MarkFailed) - RunBusyAsync awaits this instead of closing the overlay immediately; ConfirmBusyCommand completes it once the user has actually seen GitOutputLog and dismisses it themselves.</summary>
     private TaskCompletionSource? busyConfirmTcs;
 
-    public VersionSectionViewModel(IWorkspaceVersioningService versioningService, IDialogService dialogService, GenerateTabViewModel generate, IUiDispatcher dispatcher)
+    public VersionSectionViewModel(IWorkspaceVersioningService versioningService, IDialogService dialogService, ITemplateService templateService, GenerateTabViewModel generate, IUiDispatcher dispatcher)
     {
         this.versioningService = versioningService;
         this.dialogService = dialogService;
+        this.templateService = templateService;
         this.generate = generate;
         this.dispatcher = dispatcher;
         generate.NormalTurnStarted += OnGenerateNormalTurnStarted;
@@ -462,13 +464,13 @@ public sealed partial class VersionSectionViewModel : ViewModelBase, IDisposable
 
         if (await dialogService.ShowTemplatesDialogAsync(canApply: true) is { } applied)
         {
-            await ApplyTemplateAsync(applied.Name, applied.Content);
+            await ApplyTemplateAsync(applied.Name, applied.Path);
         }
     }
 
     /// <summary>
     /// Submits a real Generate request (see GenerateTabViewModel.SubmitRequestAsync) instructing the AI to
-    /// apply a template's content (see ITemplateService/TemplatesDialogViewModel) to this workspace, with
+    /// read and apply a template file (see ITemplateService/TemplatesDialogViewModel) to this workspace, with
     /// "Apply template {templateName}" as the request card's own display text rather than the template's full
     /// raw content - switches to Generate automatically so the user lands on it right away, same as a
     /// genuinely typed message would once submitted. IsAiWorking is handled by the usual
@@ -480,7 +482,7 @@ public sealed partial class VersionSectionViewModel : ViewModelBase, IDisposable
     /// to scaffold it - see EnsureRepoAsync), or from the title bar's Templates popup applying one to whatever
     /// workspace happens to be open at the time.
     /// </summary>
-    public async Task ApplyTemplateAsync(string templateName, string templateContent)
+    public async Task ApplyTemplateAsync(string templateName, string templatePath)
     {
         if (IsInteractionBlocked)
         {
@@ -489,23 +491,28 @@ public sealed partial class VersionSectionViewModel : ViewModelBase, IDisposable
         }
 
         SwitchToGenerateRequested?.Invoke();
-        await generate.SubmitRequestAsync($"Apply template {templateName}", BuildTemplateInstruction(templateContent));
+        await generate.SubmitRequestAsync($"Apply template {templateName}", BuildTemplateInstruction(templatePath, templateService.GetTemplatesDirectory()));
     }
 
-    private static string BuildTemplateInstruction(string templateContent) =>
-        "Apply the following template to this workspace, which describes how it should be organized and " +
-        "configured. This applies equally whether the workspace is currently empty or already has content: " +
-        "if empty, scaffold the initial structure the template describes; if it already has files, restructure " +
-        "and rewrite whatever's there as needed so the workspace conforms to the template, moving/renaming/" +
-        "deleting/rewriting existing files as needed rather than only adding alongside them.\n\n" +
+    private static string BuildTemplateInstruction(string templatePath, string templatesDirectory) =>
+        $"Read the template at \"{templatePath}\" (outside this workspace - use your own file-reading tool " +
+        "on that absolute path directly) and apply it to this workspace, which describes how the workspace " +
+        "should be organized and configured. This applies equally whether the workspace is currently empty " +
+        "or already has content: if empty, scaffold the initial structure the template describes; if it " +
+        "already has files, restructure and rewrite whatever's there as needed so the workspace conforms to " +
+        "the template, moving/renaming/deleting/rewriting existing files as needed rather than only adding " +
+        "alongside them.\n\n" +
         "The template may itself be written as a diff against some other baseline (e.g. \"inherits from " +
         "X, only what's different is listed below\") that this workspace was never literally built from - " +
-        "don't treat that as a blocker or a reason to stop and ask. Read through the template for its actual " +
-        "intent (the conventions, layout, and configuration it's steering toward), compare that against " +
-        "this workspace's current structure/naming/conventions, and map the existing workspace onto that " +
-        "intent yourself: e.g. if the template says some directory replaces another with the same internal " +
-        "shape, find this workspace's own equivalent (even if named or organized differently) and restructure " +
-        "it accordingly, adapting file/config content along the way rather than only renaming folders.\n\n" +
+        "don't treat that as a blocker or a reason to stop and ask. If it names another template that way, " +
+        $"look for it alongside this one in \"{templatesDirectory}\" (every template lives directly in that " +
+        "one folder) and read that too before proceeding. Either way, read through the template(s) for their " +
+        "actual intent (the conventions, layout, and configuration they're steering toward), compare that " +
+        "against this workspace's current structure/naming/conventions, and map the existing workspace onto " +
+        "that intent yourself: e.g. if the template says some directory replaces another with the same " +
+        "internal shape, find this workspace's own equivalent (even if named or organized differently) and " +
+        "restructure it accordingly, adapting file/config content along the way rather than only renaming " +
+        "folders.\n\n" +
         "A large rewrite of the existing workspace is expected and fully intended here, not a concern to " +
         "flag or hesitate over on its own - this workspace is under version control, so every change here " +
         "is fully reversible. For an empty workspace, or an existing one where the template's intent maps " +
@@ -515,8 +522,7 @@ public sealed partial class VersionSectionViewModel : ViewModelBase, IDisposable
         "of project than what's actually here, or following it faithfully would mean discarding substantial " +
         "existing functionality that has nothing to do with what the template covers - stop and ask first, " +
         "explaining the concern, rather than proceeding on your own judgment call. This is a normal " +
-        "conversation the user can see and reply to, so a real question here gets a real answer.\n\n" +
-        templateContent;
+        "conversation the user can see and reply to, so a real question here gets a real answer.";
 
     private static string BuildConflictInstruction(IReadOnlyList<string> conflictedFiles) =>
         "This produced merge conflicts in: " + string.Join(", ", conflictedFiles) + ". " +

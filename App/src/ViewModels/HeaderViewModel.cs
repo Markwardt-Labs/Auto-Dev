@@ -112,7 +112,18 @@ public sealed partial class HeaderViewModel : ViewModelBase
         RefreshTokenUsageDisplay();
     }
 
-    public event Action<WorkspaceInfo>? WorkspaceOpened;
+    /// <summary>
+    /// ForceReload - true only from CloneAsync - tells MainShellViewModel.OnWorkspaceOpened to rebuild the
+    /// workspace even if its path matches whatever's already open, rather than treating that as a harmless
+    /// re-open of the same still-valid workspace (its own usual optimization, preserving in-progress state
+    /// like an active AI turn). A clone's own Directory.Exists(destination) check already guarantees the
+    /// destination didn't exist a moment ago, so a same-path clone can only mean the workspace previously open
+    /// there was deleted (outside AutoDev) and this is genuinely fresh content, not the same workspace at all -
+    /// skipping the rebuild left the stale pre-deletion WorkspaceViewModel on screen indefinitely, one visible
+    /// symptom being VersionSectionViewModel.EnsureRepoAsync (and so the empty-workspace template offer) never
+    /// running against the new clone's actual content.
+    /// </summary>
+    public event Action<(WorkspaceInfo Workspace, bool ForceReload)>? WorkspaceOpened;
 
     /// <summary>Title bar's top-left button - starts a second, fully independent AutoDev instance, since one instance now only ever opens a single workspace at a time.</summary>
     [RelayCommand]
@@ -184,11 +195,11 @@ public sealed partial class HeaderViewModel : ViewModelBase
         await OpenWorkspaceAsync(path);
     }
 
-    /// <summary>Opens a workspace folder by path with no picker UI involved - shared by BrowseForFolderAsync/CloneAsync/OpenRecentAsync's identical tail.</summary>
-    private async Task OpenWorkspaceAsync(string path)
+    /// <summary>Opens a workspace folder by path with no picker UI involved - shared by BrowseForFolderAsync/CloneAsync/OpenRecentAsync's identical tail. forceReload - see WorkspaceOpened's own doc comment - is true only from CloneAsync.</summary>
+    private async Task OpenWorkspaceAsync(string path, bool forceReload = false)
     {
         WorkspaceInfo workspace = await workspaceService.OpenOrCreateAsync(path);
-        WorkspaceOpened?.Invoke(workspace);
+        WorkspaceOpened?.Invoke((workspace, forceReload));
         await RefreshRecentWorkspacesAsync();
     }
 
@@ -259,7 +270,7 @@ public sealed partial class HeaderViewModel : ViewModelBase
             return;
         }
 
-        await OpenWorkspaceAsync(destination);
+        await OpenWorkspaceAsync(destination, forceReload: true);
     }
 
     /// <summary>The only way to interrupt an in-flight clone - CliWrap forcefully kills the git process on cancellation, then CloneAsync's catch block cleans up the now-partial destination folder.</summary>

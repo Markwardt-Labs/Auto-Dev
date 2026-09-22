@@ -9,7 +9,7 @@ using AutoDev.ViewModels.Infrastructure;
 
 namespace AutoDev.Infrastructure;
 
-public sealed class AvaloniaDialogService(ITemplateService templateService) : IDialogService
+public sealed class AvaloniaDialogService(ITemplateService templateService, IExternalOpenService externalOpenService) : IDialogService
 {
     private static Window OwnerWindow =>
         (Avalonia.Application.Current?.ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.MainWindow
@@ -29,23 +29,6 @@ public sealed class AvaloniaDialogService(ITemplateService templateService) : ID
         });
 
         return folders.Count > 0 ? folders[0].TryGetLocalPath() : null;
-    }
-
-    public async Task<string?> PickFileAsync(string title, IReadOnlyList<string> extensions, string? startDirectory = null)
-    {
-        IStorageFolder? suggestedStartLocation = startDirectory is null
-            ? null
-            : await OwnerWindow.StorageProvider.TryGetFolderFromPathAsync(startDirectory);
-
-        IReadOnlyList<IStorageFile> files = await OwnerWindow.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = title,
-            AllowMultiple = false,
-            SuggestedStartLocation = suggestedStartLocation,
-            FileTypeFilter = [new FilePickerFileType(string.Join('/', extensions)) { Patterns = [.. extensions.Select(e => $"*{e}")] }],
-        });
-
-        return files.Count > 0 ? files[0].TryGetLocalPath() : null;
     }
 
     public async Task<string?> ShowInputDialogAsync(string title, string label, string initialValue = "", bool requireValue = false)
@@ -99,7 +82,7 @@ public sealed class AvaloniaDialogService(ITemplateService templateService) : ID
 
     public async Task<AppliedTemplate?> ShowTemplatesDialogAsync(bool canApply)
     {
-        TemplatesDialogViewModel vm = new TemplatesDialogViewModel(templateService, this, canApply);
+        TemplatesDialogViewModel vm = new TemplatesDialogViewModel(templateService, externalOpenService, canApply);
         TemplatesDialogWindow window = new TemplatesDialogWindow { DataContext = vm };
         return await window.ShowDialog<AppliedTemplate?>(OwnerWindow);
     }

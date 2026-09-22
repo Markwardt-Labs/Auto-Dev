@@ -76,6 +76,16 @@ public partial class EditTabView : UserControl
             textMateInstallation = editor.InstallTextMate(registryOptions);
             editor.TextChanged += OnEditorTextChanged;
 
+            // Disabled outright: clicking inside an already-selected block and dragging it (AvaloniaEdit's
+            // built-in "drag selected text to move it" gesture - see SelectionMouseHandler.StartDrag) starts a
+            // native OS drag-and-drop (DragDrop.DoDragDropAsync), awaited on the UI thread. Dragging that past
+            // the editor/window's own bounds hits a known Avalonia X11 pointer-capture bug where the drag
+            // session never resolves - the await never completes, permanently freezing the whole app (not just
+            // this control) since it's blocking the UI thread's own dispatcher loop. No in-editor text-move
+            // workflow depends on this (cut/paste covers the same need), so removing the gesture entirely
+            // removes the freeze risk with it, rather than trying to work around Avalonia's own X11 DnD bug.
+            editor.Options.EnableTextDragDrop = false;
+
             // AvaloniaEdit's built-in hyperlink detection (e.g. URLs inside XML attribute values)
             // defaults TextView.LinkTextForegroundBrush to Brushes.Blue (#0000FF), which is hard to
             // read against our dark background and is unrelated to/not overridden by the TextMate theme.
@@ -481,6 +491,17 @@ public partial class EditTabView : UserControl
         // already attached, tokenizes the right content immediately.
         UpdateLanguage();
 
+        // Still not quite enough on its own, though: SetGrammar's own Redraw() call can land before the
+        // editor's TextView has ever been measured/attached to the visual tree (e.g. this whole View is being
+        // constructed for the very first time - OnDataContextChanged calls OnFileLoaded(null) immediately -
+        // or a workspace tab is still mid-layout right as its first file loads), in which case there are no
+        // visual lines yet for it to invalidate and nothing else ever prompts a redraw once layout actually
+        // happens. Posted at Loaded priority - after that layout pass completes - to force one, the same fix
+        // already used for embedded markdown code-block editors (see ApplyMarkdownCodeColors's own comment)
+        // for the identical "freshly attached TextEditor renders before it's tokenized" race. A harmless
+        // no-op redraw the rest of the time, when SetGrammar's own immediate one already rendered correctly.
+        Dispatcher.UIThread.Post(() => editor?.TextArea.TextView.Redraw(), DispatcherPriority.Loaded);
+
         // A content-search result click (see FileSearchViewModel.ContentResultChosen) - jump the caret/scroll
         // to the matched line once the right document is actually attached.
         if (seekToLine is { } line)
@@ -621,9 +642,27 @@ public partial class EditTabView : UserControl
         {
             codeEditor.FontFamily = new FontFamily("monospace");
 
+            // Same freeze risk as the main Editor - see its own EnableTextDragDrop comment in the
+            // constructor. This one's per-instance too (a fresh CodePad TextEditor per fenced block), so it
+            // has to be set here rather than once, same reasoning as SyntaxHighlighting/FontFamily above.
+            codeEditor.Options.EnableTextDragDrop = false;
+
             if (codeEditor.SyntaxHighlighting is { } highlighting)
             {
                 MarkdownCodeHighlightTheme.Apply(highlighting);
+            }
+            else
+            {
+                // A fenced block whose language tag isn't one AvaloniaEdit ships a highlighting definition
+                // for (e.g. ```yaml, ```toml, ```dockerfile - anything TextMateSharp's own grammar registry
+                // covers but this classic XSHD-based highlighter doesn't) still renders as this same CodePad
+                // TextEditor, just with SyntaxHighlighting left null - and AvaloniaEdit's own default
+                // Foreground for that (Black, picked for a light editor background) is unreadable against
+                // this app's dark theme rather than genuinely "no highlighting" (plain, readable text). Both
+                // TextEditor.Foreground and TextArea.Foreground need setting - the TextArea's own is what
+                // actually paints the text, and it doesn't reliably pick up a value set only on its parent.
+                codeEditor.Foreground = Brushes.White;
+                codeEditor.TextArea.Foreground = Brushes.White;
             }
 
             codeEditor.TextArea.TextView.Redraw();

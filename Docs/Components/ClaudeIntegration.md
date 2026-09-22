@@ -126,6 +126,14 @@ Three buttons cover stopping a turn, each doing something different:
 - **Resume** (`ResumeAsync`) flips the same request back to `Working`, starts a fresh subprocess
   resuming that captured session id, and sends "Continue from where you left off." - still the same
   request/turn no matter how many times it's paused and resumed, never a new `GenerateRequestViewModel`.
+- **Sending new input while Paused**: `CanSend()` isn't gated on the active request's status either,
+  so `SendAsync` itself has to tell this apart from both a brand-new turn and a live interjection -
+  it folds the new text into the paused request's own `Input` (exactly like an interjection would)
+  and resumes it via the same mechanism `ResumeAsync` uses (a fresh subprocess against the captured
+  session id), except the newly typed text is sent as the resume message itself instead of Resume's
+  own generic "Continue from where you left off." placeholder. Without this, the paused request was
+  left stuck Paused forever while an unrelated second one started alongside it - Send has to check
+  for this case explicitly since nothing else does.
 
 Closing the app or workspace mid-turn is treated exactly like an explicit Pause rather than losing
 the turn to a silent Cancel, however it happens: `DisposeAsync` marks a still-`Working` active
@@ -186,7 +194,9 @@ Claude Code picks up alongside its next tool result rather than making the user 
 current turn to finish. It's sent as ordinary text, not the interactive CLI's `/btw` prefix - that
 convention only exists in the interactive terminal and is rejected outright over the stream-json
 protocol AutoDev actually drives the CLI with; a plain message sent mid-turn is picked up as an
-interjection just as well with no special prefix needed.
+interjection just as well with no special prefix needed. Sending while the active request sits
+Paused (no turn in flight, so nothing to interject into) is handled as its own third case instead -
+see Pause/Resume above.
 
 Because an interjection can produce its own `ResultEvent` before Claude has actually gotten to
 addressing it, `_pendingTurnCount` tracks how many outstanding messages (the initial send, plus one

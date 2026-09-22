@@ -136,7 +136,7 @@ public sealed partial class WorkspaceViewModel : ViewModelBase, IAsyncDisposable
     }
 
     /// <summary>Applies a template to this workspace - see the title bar's Templates popup and VersionSectionViewModel.ApplyTemplateAsync.</summary>
-    public Task ApplyTemplateAsync(string templateName, string templateContent) => Version.ApplyTemplateAsync(templateName, templateContent);
+    public Task ApplyTemplateAsync(string templateName, string templatePath) => Version.ApplyTemplateAsync(templateName, templatePath);
 
     public async Task InitializeAsync()
     {

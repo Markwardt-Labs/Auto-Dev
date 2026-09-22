@@ -1,24 +1,23 @@
 using System.Collections.ObjectModel;
 using AutoDev.Core.Models;
 using AutoDev.Core.Services;
-using AutoDev.ViewModels.Infrastructure;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 namespace AutoDev.ViewModels.Dialogs;
 
-/// <summary>Lists every registered scaffolding template, with Remove (unregister) and - only while CanApply - Apply (scaffold the currently open workspace) per row, plus an Add button that registers a new one via a file picker. See ITemplateService for why a template's content is never cached here.</summary>
+/// <summary>Lists every template in ITemplateService.GetTemplatesDirectory(), with Apply per row while CanApply (scaffold the currently open workspace), plus an "Open Templates" button that opens that folder in the OS file manager - adding/removing a template is just adding/removing a file there directly, not a separate step in this dialog. See ITemplateService for why a template's content is never read here at all.</summary>
 public sealed partial class TemplatesDialogViewModel : ViewModelBase
 {
     private readonly ITemplateService templateService;
-    private readonly IDialogService dialogService;
+    private readonly IExternalOpenService externalOpenService;
 
-    public TemplatesDialogViewModel(ITemplateService templateService, IDialogService dialogService, bool canApply)
+    public TemplatesDialogViewModel(ITemplateService templateService, IExternalOpenService externalOpenService, bool canApply)
     {
         this.templateService = templateService;
-        this.dialogService = dialogService;
+        this.externalOpenService = externalOpenService;
         CanApply = canApply;
-        _ = RefreshAsync();
+        Refresh();
     }
 
     public ObservableCollection<WorkspaceTemplate> Templates { get; } = [];
@@ -26,51 +25,24 @@ public sealed partial class TemplatesDialogViewModel : ViewModelBase
     /// <summary>False when no workspace is currently open - Apply has nothing to scaffold then, so it's hidden entirely (see TemplatesDialogWindow.axaml) rather than shown disabled.</summary>
     public bool CanApply { get; }
 
-    [ObservableProperty]
-    private bool isLoading;
-
-    /// <summary>Non-null argument is the template that was applied (name plus its freshly-read content); null means the dialog was closed (Close button, or the window's own chrome) without applying one.</summary>
+    /// <summary>Non-null argument is the template that was applied (name plus its file path); null means the dialog was closed (Close button, or the window's own chrome) without applying one.</summary>
     public event Action<AppliedTemplate?>? RequestClose;
 
-    private async Task RefreshAsync()
+    private void Refresh()
     {
-        IsLoading = true;
-        IReadOnlyList<WorkspaceTemplate> templates = await templateService.GetRegisteredTemplatesAsync();
         Templates.Clear();
-        foreach (WorkspaceTemplate template in templates)
+        foreach (WorkspaceTemplate template in templateService.GetTemplates())
         {
             Templates.Add(template);
         }
-
-        IsLoading = false;
     }
 
+    /// <summary>Opens the templates folder in the OS file manager - the only way to add/remove a template, since the folder's own contents are the whole registry (see ITemplateService). Reopen this dialog afterward to see a template added/removed there.</summary>
     [RelayCommand]
-    private async Task AddTemplateAsync()
-    {
-        string? path = await dialogService.PickFileAsync("Add Template", [".md"], templateService.GetDefaultTemplatesDirectory());
-        if (path is null)
-        {
-            return;
-        }
-
-        await templateService.RegisterTemplateAsync(path);
-        await RefreshAsync();
-    }
-
-    [RelayCommand]
-    private async Task RemoveAsync(WorkspaceTemplate template)
-    {
-        await templateService.UnregisterTemplateAsync(template.Path);
-        await RefreshAsync();
-    }
+    private void OpenTemplatesFolder() => externalOpenService.OpenFolder(templateService.GetTemplatesDirectory());
 
     [RelayCommand(CanExecute = nameof(CanApply))]
-    private async Task ApplyAsync(WorkspaceTemplate template)
-    {
-        string content = await templateService.ReadTemplateContentAsync(template.Path);
-        RequestClose?.Invoke(new AppliedTemplate { Name = template.Name, Content = content });
-    }
+    private void Apply(WorkspaceTemplate template) => RequestClose?.Invoke(new AppliedTemplate { Name = template.Name, Path = template.Path });
 
     [RelayCommand]
     private void Close() => RequestClose?.Invoke(null);

@@ -132,9 +132,26 @@ public partial class GenerateTabView : UserControl
         // tokenizing it, leaving it plain until some unrelated event forces a redraw.
         foreach (TextEditor? editor in codeBlocks.SelectMany(b => b.GetLogicalDescendants().OfType<AvaloniaEdit.TextEditor>()))
         {
+            // Disabled outright: dragging an already-selected block of text past the editor/window's own
+            // bounds hits a known Avalonia X11 pointer-capture bug where the native drag-and-drop session this
+            // gesture starts (SelectionMouseHandler.StartDrag, awaited on the UI thread) never resolves,
+            // permanently freezing the whole app - see EditTabView.axaml.cs's own identical fix/doc comment.
+            editor.Options.EnableTextDragDrop = false;
+
             if (editor.SyntaxHighlighting is { } highlighting)
             {
                 MarkdownCodeHighlightTheme.Apply(highlighting);
+            }
+            else
+            {
+                // A fenced block whose language tag has no AvaloniaEdit highlighting definition still
+                // renders as this same CodePad TextEditor, just with SyntaxHighlighting left null - and its
+                // own default Foreground (Black, picked for a light editor background) is unreadable against
+                // this app's dark theme rather than genuinely "no highlighting" (plain, readable text) - see
+                // EditTabView.axaml.cs's own identical fix for the full reasoning. Both TextEditor.Foreground
+                // and TextArea.Foreground need setting - the TextArea's own is what actually paints the text.
+                editor.Foreground = Brushes.White;
+                editor.TextArea.Foreground = Brushes.White;
             }
 
             editor.TextArea.TextView.Redraw();

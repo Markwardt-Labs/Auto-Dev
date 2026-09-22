@@ -23,7 +23,6 @@ public sealed class ScriptTabViewTests
 
     public ScriptTabViewTests()
     {
-        TestAppBuilder.EnsureInitialized();
         dispatcher.Setup(d => d.Post(It.IsAny<Action>())).Callback<Action>(action => action());
         metadataStore
             .Setup(store => store.LoadScriptRunsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -31,7 +30,7 @@ public sealed class ScriptTabViewTests
     }
 
     [Fact]
-    public void StreamingOutputPastViewportHeight_StaysScrolledToBottom()
+    public void StreamingOutputPastViewportHeight_StaysScrolledToBottom() => TestAppBuilder.RunOnUiThread(() =>
     {
         LiveScriptRun liveRun = new();
         scriptRunner.Setup(runner => runner.GetLiveRun("Scripts/Test.cs")).Returns(liveRun);
@@ -57,10 +56,10 @@ public sealed class ScriptTabViewTests
         Assert.True(
             scroller.Offset.Y + scroller.Viewport.Height >= scroller.Extent.Height - 2.0,
             $"Expected to stay scrolled to the bottom (Offset={scroller.Offset.Y}, Viewport={scroller.Viewport.Height}, Extent={scroller.Extent.Height}).");
-    }
+    });
 
     [Fact]
-    public void SwitchingEntries_ResetsAutoScrollEvenIfThePreviousOneWasScrolledAway()
+    public void SwitchingEntries_ResetsAutoScrollEvenIfThePreviousOneWasScrolledAway() => TestAppBuilder.RunOnUiThread(() =>
     {
         LiveScriptRun liveRunA = new();
         LiveScriptRun liveRunB = new();
@@ -104,5 +103,5 @@ public sealed class ScriptTabViewTests
         Assert.True(
             scroller.Offset.Y + scroller.Viewport.Height >= scroller.Extent.Height - 2.0,
             $"Expected B to auto-scroll despite A having been scrolled away from (Offset={scroller.Offset.Y}, Viewport={scroller.Viewport.Height}, Extent={scroller.Extent.Height}).");
-    }
+    });
 }

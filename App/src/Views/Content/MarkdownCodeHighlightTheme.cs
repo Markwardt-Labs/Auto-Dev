@@ -41,9 +41,14 @@ internal static class MarkdownCodeHighlightTheme
     // their own dedicated color untouched.
     private static readonly Regex identifierPattern = new(@"\b[a-z_][A-Za-z0-9_]*\b(?!\s*\()");
 
-    /// <summary>Cheap and idempotent - safe (and expected) to call on every embedded code-block TextEditor found, every time a markdown view re-renders, rather than once globally.</summary>
+    /// <summary>Cheap and idempotent - safe (and expected) to call on every embedded code-block TextEditor found, every time a markdown view re-renders, rather than once globally. A no-op for anything other than a genuine ```csharp block ("Re:C#" - see this class's own doc comment for the naming) - every rule/regex below is C#-specific, most notably TypeNamePattern/IdentifierPattern's own bare "looks like a word" matches, which would otherwise recolor essentially any bare token (e.g. JSON's true/false/null, or a Python block's own keywords) in a completely different language's own highlighting definition.</summary>
     public static void Apply(IHighlightingDefinition definition)
     {
+        if (definition.Name != "Re:C#")
+        {
+            return;
+        }
+
         string keyword = "#569CD6";
         string type = "#4EC9B0";
         string identifier = "#9CDCFE";

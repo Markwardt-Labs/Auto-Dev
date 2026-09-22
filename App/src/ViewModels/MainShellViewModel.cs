@@ -44,21 +44,23 @@ public sealed partial class MainShellViewModel : ViewModelBase
         await Header.RefreshRecentWorkspacesAsync();
     }
 
-    /// <summary>Title bar's Templates icon button - opens the register/remove/apply popup; Apply only shows while a workspace is actually open (see TemplatesDialogViewModel.CanApply), targeting whichever one that is.</summary>
+    /// <summary>Title bar's Templates icon button - opens the browse/apply popup; Apply only shows while a workspace is actually open (see TemplatesDialogViewModel.CanApply), targeting whichever one that is.</summary>
     [RelayCommand]
     private async Task OpenTemplatesAsync()
     {
         if (await dialogService.ShowTemplatesDialogAsync(canApply: Workspace is not null) is { } applied && Workspace is not null)
         {
-            await Workspace.ApplyTemplateAsync(applied.Name, applied.Content);
+            await Workspace.ApplyTemplateAsync(applied.Name, applied.Path);
         }
     }
 
-    private async void OnWorkspaceOpened(WorkspaceInfo workspace)
+    private async void OnWorkspaceOpened((WorkspaceInfo Workspace, bool ForceReload) args)
     {
+        (WorkspaceInfo workspace, bool forceReload) = args;
+
         if (Workspace is { } existing)
         {
-            if (existing.Workspace.FullPath == workspace.FullPath)
+            if (existing.Workspace.FullPath == workspace.FullPath && !forceReload)
             {
                 return;
             }

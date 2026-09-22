@@ -10,8 +10,8 @@
         Title="Templates"
         Background="{DynamicResource EditorBackgroundBrush}">
     <StackPanel Margin="16" Spacing="10">
-        <TextBlock Text="No templates registered yet." Foreground="{DynamicResource TextMutedBrush}"
-                   IsVisible="{Binding !Templates.Count}" />
+        <TextBlock Text="No templates yet - use &quot;Open Templates&quot; below to add one." Foreground="{DynamicResource TextMutedBrush}"
+                   TextWrapping="Wrap" IsVisible="{Binding !Templates.Count}" />
 
         <ScrollViewer MaxHeight="360" IsVisible="{Binding Templates.Count}">
             <ItemsControl ItemsSource="{Binding Templates}">
@@ -19,7 +19,7 @@
                     <DataTemplate DataType="models:WorkspaceTemplate">
                         <Border Padding="10,8" Margin="0,0,0,4" CornerRadius="4"
                                 Background="{DynamicResource HeaderBackgroundBrush}">
-                            <Grid ColumnDefinitions="*,Auto,Auto">
+                            <Grid ColumnDefinitions="*,Auto">
                                 <StackPanel Grid.Column="0" Spacing="1" VerticalAlignment="Center">
                                     <TextBlock Text="{Binding Name}" FontSize="12.5" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Text="{Binding Path}" FontSize="10.5"
@@ -31,11 +31,6 @@
                                         CommandParameter="{Binding}">
                                     <Path Classes="lineIcon" Data="{StaticResource PlayIconGeometry}" Width="11" Height="11" />
                                 </Button>
-                                <Button Grid.Column="2" Classes="iconButton" ToolTip.Tip="Remove"
-                                        Command="{Binding $parent[Window].((vm:TemplatesDialogViewModel)DataContext).RemoveCommand}"
-                                        CommandParameter="{Binding}">
-                                    <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="10" Height="10" />
-                                </Button>
                             </Grid>
                         </Border>
                     </DataTemplate>
@@ -44,7 +39,8 @@
         </ScrollViewer>
 
         <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,4,0,0">
-            <Button Grid.Column="0" Content="Add Template…" Command="{Binding AddTemplateCommand}" />
+            <Button Grid.Column="0" Content="Open Templates" ToolTip.Tip="Opens the templates folder in the file manager - add or remove templates there"
+                    Command="{Binding OpenTemplatesFolderCommand}" />
             <Button Grid.Column="2" Content="Close" Command="{Binding CloseCommand}" />
         </Grid>
     </StackPanel>

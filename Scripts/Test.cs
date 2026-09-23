@@ -13,7 +13,7 @@ Script.Delete(testResultsFolder);
 
 (await Script.Run("dotnet", "test", "Tests/Tests.csproj", "--settings", "Tests/coverage.runsettings", "--collect:XPlat Code Coverage", "--results-directory", testResultsFolder)).Verify();
 
-(await Script.Run(false, "dotnet", "reportgenerator", $"-reports:{testResultsFolder}/**/coverage.cobertura.xml", $"-targetdir:{testResultsFolder}", "-reporttypes:TextSummary")).Verify();
+(await Script.Run(false, "dotnet", "tool", "run", "reportgenerator", $"-reports:{testResultsFolder}/**/coverage.cobertura.xml", $"-targetdir:{testResultsFolder}", "-reporttypes:TextSummary")).Verify();
 
 Script.Log(await Script.Read(Path.Combine(testResultsFolder, "Summary.txt")) ?? throw new InvalidOperationException("Coverage summary was not generated."));
 Script.Delete(testResultsFolder);

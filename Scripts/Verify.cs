@@ -14,7 +14,7 @@ Script.Delete("Tests/TestResults");
 
 (await Script.Run("dotnet", "test", "Tests/Tests.csproj", "--configuration", "Debug", "--settings", "Tests/coverage.runsettings", "--collect:XPlat Code Coverage")).Verify();
 
-(await Script.Run(false, "dotnet", "reportgenerator", "-reports:Tests/TestResults/**/coverage.cobertura.xml", "-targetdir:.github/badges", "-reporttypes:Badges")).Verify();
+(await Script.Run(false, "dotnet", "tool", "run", "reportgenerator", "-reports:Tests/TestResults/**/coverage.cobertura.xml", "-targetdir:.github/badges", "-reporttypes:Badges")).Verify();
 Script.Delete("Tests/TestResults");
 
 Script.Log("Verification complete - review any formatting/badge changes and commit and push them yourself if there are any.");

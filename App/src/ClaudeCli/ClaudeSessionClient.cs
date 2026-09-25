@@ -97,7 +97,7 @@ public sealed class ClaudeSessionClient : IAiSessionClient
         startInfo.ArgumentList.Add("--append-system-prompt");
         startInfo.ArgumentList.Add(AiSystemPromptGuidance.Text);
 
-        if (!string.IsNullOrEmpty(resumeSessionId))
+        if (!string.IsNullOrEmpty(resumeSessionId) && TranscriptExists(resumeSessionId))
         {
             SessionId = resumeSessionId;
             startInfo.ArgumentList.Add("--resume");
@@ -114,6 +114,36 @@ public sealed class ClaudeSessionClient : IAiSessionClient
 
         _ = Task.Run(() => ReadOutputLoopAsync(process, lifetimeCts.Token));
         _ = Task.Run(() => ReadStderrLoopAsync(process, lifetimeCts.Token));
+    }
+
+    /// <summary>
+    /// `claude --resume` for a session whose transcript is gone (cleaned up, or the workspace was moved) just
+    /// emits an error result and exits - which the Generate tab would show as a request that instantly
+    /// "completes" with no output, with the dead process still attached to every later send. Checked up front
+    /// so Start can fall back to a fresh session instead. Transcripts live at
+    /// `{config}/projects/{encoded cwd}/{sessionId}.jsonl`; the encoding of the cwd is CLI-internal, so every
+    /// project folder is searched for the id rather than reproducing it.
+    /// </summary>
+    private static bool TranscriptExists(string sessionId)
+    {
+        string configDirectory = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") is { Length: > 0 } configured
+            ? configured
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
+        string projectsDirectory = Path.Combine(configDirectory, "projects");
+
+        try
+        {
+            return Directory.Exists(projectsDirectory)
+                && Directory.EnumerateDirectories(projectsDirectory).Any(directory => File.Exists(Path.Combine(directory, $"{sessionId}.jsonl")));
+        }
+        catch (IOException)
+        {
+            return true; // can't tell - let the CLI itself decide
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return true;
+        }
     }
 
     private async Task ReadOutputLoopAsync(Process process, CancellationToken cancellationToken)

@@ -378,7 +378,8 @@ Claude's tool calls and a concurrent git mutation.
 
 A read-only browser built directly on the same service, plus every action above:
 
-- `ListAllBranchesAsync()` → `BranchSummary(Name, IsCurrent)` per local branch, current-first then
+- `ListAllBranchesAsync()` → `BranchSummary(Name, IsCurrent)` per branch (a branch known only as `origin/*` gets a local
+  branch materialized first, via `EnsureLocalBranchAsync`), current-first then
   alphabetical - shown as a flat list (`BranchRows`), no parent/child hierarchy. `IsCurrent` (bold
   row - see `HistoryTabView.axaml`'s `currentBranch` style) is only ever true for the actual
   checked-out branch, so nothing is bolded here at all while HEAD is detached at a tag/commit -

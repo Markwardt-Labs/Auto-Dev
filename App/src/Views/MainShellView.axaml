@@ -63,18 +63,18 @@
                         <StackPanel Orientation="Horizontal" Spacing="14" VerticalAlignment="Center"
                                     IsVisible="{Binding Header.HasPeriodUsage}">
                             <StackPanel Spacing="0" VerticalAlignment="Center" ToolTip.Tip="{Binding Header.SessionResetTooltip}">
-                                <TextBlock Classes="usageText" Classes.critical="{Binding Header.IsSessionUsageCritical}"
+                                <TextBlock Classes="usageText" Tag="{Binding Header.SessionPace}"
                                            Text="{Binding Header.SessionUsageDisplay}" HorizontalAlignment="Right" FontSize="12" />
-                                <TextBlock Text="{Binding Header.SessionResetCountdown}" HorizontalAlignment="Right"
+                                <TextBlock Classes="usageText" Tag="{Binding Header.SessionPace}" Text="{Binding Header.SessionResetCountdown}" HorizontalAlignment="Right"
                                            IsVisible="{Binding Header.SessionResetCountdown, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
-                                           Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Opacity="0.7" />
+                                           FontSize="10" Opacity="0.7" />
                             </StackPanel>
                             <StackPanel Spacing="0" VerticalAlignment="Center" ToolTip.Tip="{Binding Header.WeekResetTooltip}">
-                                <TextBlock Classes="usageText" Classes.critical="{Binding Header.IsWeekUsageCritical}"
+                                <TextBlock Classes="usageText" Tag="{Binding Header.WeekPace}"
                                            Text="{Binding Header.WeekUsageDisplay}" HorizontalAlignment="Right" FontSize="12" />
-                                <TextBlock Text="{Binding Header.WeekResetCountdown}" HorizontalAlignment="Right"
+                                <TextBlock Classes="usageText" Tag="{Binding Header.WeekPace}" Text="{Binding Header.WeekResetCountdown}" HorizontalAlignment="Right"
                                            IsVisible="{Binding Header.WeekResetCountdown, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}"
-                                           Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Opacity="0.7" />
+                                           FontSize="10" Opacity="0.7" />
                             </StackPanel>
                         </StackPanel>
 

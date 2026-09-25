@@ -453,7 +453,7 @@ public sealed class WorkspaceVersioningService(string workspacePath, IGitService
         {
             if (!await git.BranchExistsAsync(workspacePath, name, cancellationToken))
             {
-                continue; // remote-only, no local branch to show/select
+                await git.EnsureLocalBranchAsync(workspacePath, name, cancellationToken); // remote-only: materialize so it's listable/selectable like any other branch
             }
 
             results.Add(new BranchSummary(name, IsCurrent: name == current));

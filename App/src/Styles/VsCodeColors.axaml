@@ -15,7 +15,11 @@
     <SolidColorBrush x:Key="HoverBackgroundBrush" Color="#2A2D2E" />
     <SolidColorBrush x:Key="SelectionBackgroundBrush" Color="#094771" />
     <SolidColorBrush x:Key="DangerBrush" Color="#C74E39" />
-    <SolidColorBrush x:Key="UsageCriticalBrush" Color="#E57373" />
+    <!-- Header session/week usage pace colors (see ControlStyles.axaml's TextBlock.usageText); an even pace uses TextMutedBrush. -->
+    <SolidColorBrush x:Key="UsagePaceVeryLowBrush" Color="#6FBF73" />
+    <SolidColorBrush x:Key="UsagePaceLowBrush" Color="#569CD6" />
+    <SolidColorBrush x:Key="UsagePaceHighBrush" Color="#E0A458" />
+    <SolidColorBrush x:Key="UsagePaceVeryHighBrush" Color="#E57373" />
     <SolidColorBrush x:Key="SuccessBrush" Color="#4EC9B0" />
     <!-- Git status colors in the file tree (see FilesSectionView.axaml's TextBlock.added/.modified) - the same
          green/gold VS Code itself uses for its own added/modified decorations. -->

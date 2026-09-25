@@ -160,7 +160,7 @@ public interface IWorkspaceVersioningService
 
     // --- History tab ---
 
-    /// <summary>Every local branch, current branch first then alphabetical.</summary>
+    /// <summary>Every branch, current branch first then alphabetical - a branch existing only as a remote-tracking ref gets a local branch materialized so it's listed too.</summary>
     Task<IReadOnlyList<BranchSummary>> ListAllBranchesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>One 100-entries-at-a-time page of `branchName`'s own commit/tag history (newest first), for the History tab's up/down pager - see BranchTimelinePage. Null if `branchName` doesn't exist.</summary>

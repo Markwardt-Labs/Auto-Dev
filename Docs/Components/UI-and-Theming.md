@@ -72,7 +72,7 @@ Split by concern rather than one monolithic file:
   `ActivityBarBackgroundBrush`, `HeaderBackgroundBrush`, `TabActiveBackgroundBrush`/
   `TabInactiveBackgroundBrush`, `AccentBrush`/`AccentHoverBrush`/`TabActiveAccentBrush`,
   `TextPrimaryBrush`/`TextMutedBrush`, `BorderSubtleBrush`, `HoverBackgroundBrush`,
-  `SelectionBackgroundBrush`, `DangerBrush`, `UsageCriticalBrush`, `SuccessBrush`,
+  `SelectionBackgroundBrush`, `DangerBrush`, the four `UsagePace*Brush` keys, `SuccessBrush`,
   `ChatFinalTextBrush` (deliberately its own key, not a reuse of `AccentBrush`, so repointing one
   doesn't recolor the other). Also defines a raw `SystemAccentColor` `Color` (not a brush), which
   Avalonia's `FluentTheme` needs to derive its own accent palette.
@@ -84,7 +84,7 @@ Split by concern rather than one monolithic file:
   controls: `Window`, `TextBlock`/`SelectableTextBlock`, `Button` (plus `.accent`/`.danger`/
   `.iconButton`/`.active`/`.sidebarAction`/`.sidebarHeading` classes), `ToggleButton`,
   `TabControl`/`TabItem` (including the `PART_SelectedPipe` underline), `TreeViewItem`, `TextBox`,
-  `ListBox`, and a few semantic classes like `TextBlock.usageText.critical` and
+  `ListBox`, and a few semantic classes like `TextBlock.usageText[Tag=...]` (pace colors) and
   `TextBlock.tabTitle.aiWorking`.
 
 **Convention**: views reference brushes and icons exclusively by resource key

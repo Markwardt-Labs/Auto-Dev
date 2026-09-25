@@ -1189,6 +1189,12 @@ public sealed partial class GenerateTabViewModel : ViewModelBase, IAsyncDisposab
             if (ReferenceEquals(this.client, client))
             {
                 _ = FinalizeAbandonedTurnAsync();
+
+                // A finished stream means the client is dead - detached here so the next send starts a fresh
+                // one (resuming the same session) instead of writing to a closed process's stdin, which throws.
+                resumeSessionId = client.SessionId;
+                this.client = null;
+                _ = client.DisposeAsync().AsTask();
             }
         });
     }

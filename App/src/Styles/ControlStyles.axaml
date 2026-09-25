@@ -182,13 +182,22 @@
         <Setter Property="Background" Value="Transparent" />
     </Style>
 
-    <!-- Session/week usage percentage text (header) - default muted, switches to a soft red once usage
-         crosses the critical threshold (see HeaderViewModel.IsSessionUsageCritical/IsWeekUsageCritical). -->
+    <!-- Session/week usage percentage and reset-countdown text (header) - default muted (an even pace),
+         colored by HeaderViewModel.SessionPace/WeekPace (bound to Tag, see UsagePace). -->
     <Style Selector="TextBlock.usageText">
         <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}" />
     </Style>
-    <Style Selector="TextBlock.usageText.critical">
-        <Setter Property="Foreground" Value="{DynamicResource UsageCriticalBrush}" />
+    <Style Selector="TextBlock.usageText[Tag=VeryLow]">
+        <Setter Property="Foreground" Value="{DynamicResource UsagePaceVeryLowBrush}" />
+    </Style>
+    <Style Selector="TextBlock.usageText[Tag=Low]">
+        <Setter Property="Foreground" Value="{DynamicResource UsagePaceLowBrush}" />
+    </Style>
+    <Style Selector="TextBlock.usageText[Tag=High]">
+        <Setter Property="Foreground" Value="{DynamicResource UsagePaceHighBrush}" />
+    </Style>
+    <Style Selector="TextBlock.usageText[Tag=VeryHigh]">
+        <Setter Property="Foreground" Value="{DynamicResource UsagePaceVeryHighBrush}" />
     </Style>
 
     <!-- Title bar's workspace-name label - switches to accent blue while its AI is working or a script is

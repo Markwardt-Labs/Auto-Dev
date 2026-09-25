@@ -64,7 +64,10 @@ Messages API's content-block shape.
 `/usage` in as a user message to a fresh process, and regex-parses the CLI's plain-text usage
 report (there's no structured JSON form of it) for the "Current session"/"Current week" percentage
 and reset-time lines. `HeaderViewModel` polls this every 60 seconds for the header's
-`Session X% / Week Y%` indicators (turning red at ≥90%) - unrelated to, and a separate service
+`Session X% / Week Y%` indicators, colored by *pace* (`UsagePeriodStatus.GetPace`): percent used minus
+percent of the window (5h session / 7-day week) already elapsed - within ±5 points is even (muted),
+5+ points off is low (blue) / high (orange), and 10+ very low (green) / very high (red) - mid-window
+that's 45%/55% and 40%/60%; an exhausted limit is always very high - unrelated to, and a separate service
 from, `IUsageAggregatorService`, which instead rolls up cumulative token/cost usage across every
 session/run this app instance has driven, for internal accounting.
 
@@ -78,7 +81,11 @@ own independent conversation, request history, and unsent draft, all persisted u
 `.autodev/local/` (`generate-sessions.json` maps session key → Claude session id, so switching
 back later resumes the same conversation via `--resume`). Switching away disposes the live
 subprocess for the outgoing session (if any) - nothing is lost, since everything is already
-persisted to disk and to the CLI's own on-disk transcript.
+persisted to disk and to the CLI's own on-disk transcript. If that transcript no longer exists (the CLI's
+`--resume` would just emit an error result and exit, which showed as an instantly "completed" empty
+request), `ClaudeSessionClient.Start` falls back to a fresh session instead; and once a client's event
+stream ends, the Generate tab detaches it so the next send starts a new subprocess rather than writing to
+a dead one.
 
 ### Turn lifecycle
 

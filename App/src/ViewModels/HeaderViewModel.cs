@@ -18,6 +18,8 @@ public sealed partial class HeaderViewModel : ViewModelBase
     private readonly IAiProviderSelectionService providerSelection;
     private readonly IUsageAggregatorService usageAggregator;
     private readonly IWorkspaceService workspaceService;
+    private readonly TimeSpan sessionWindow = TimeSpan.FromHours(5);
+    private readonly TimeSpan weekWindow = TimeSpan.FromDays(7);
     private readonly IGitService gitService;
     private readonly IDialogService dialogService;
     private readonly IUiDispatcher dispatcher;
@@ -48,9 +50,9 @@ public sealed partial class HeaderViewModel : ViewModelBase
     [ObservableProperty]
     private string sessionUsageDisplay = "Session —";
 
-    /// <summary>True once session usage reaches 90% - drives a soft-red warning color on the usage text.</summary>
+    /// <summary>Pace of session usage against its 5h window - drives the color of the session usage/reset text.</summary>
     [ObservableProperty]
-    private bool isSessionUsageCritical;
+    private UsagePace sessionPace = UsagePace.Even;
 
     [ObservableProperty]
     private string sessionResetTooltip = "";
@@ -61,9 +63,9 @@ public sealed partial class HeaderViewModel : ViewModelBase
     [ObservableProperty]
     private string weekUsageDisplay = "Week —";
 
-    /// <summary>True once week usage reaches 90% - drives a soft-red warning color on the usage text.</summary>
+    /// <summary>Pace of weekly usage against its 7-day window - drives the color of the week usage/reset text.</summary>
     [ObservableProperty]
-    private bool isWeekUsageCritical;
+    private UsagePace weekPace = UsagePace.Even;
 
     [ObservableProperty]
     private string weekResetTooltip = "";
@@ -364,7 +366,7 @@ public sealed partial class HeaderViewModel : ViewModelBase
         {
             HasPeriodUsage = true;
             SessionUsageDisplay = $"Session {session.PercentUsed}%";
-            IsSessionUsageCritical = session.PercentUsed >= 90;
+            SessionPace = session.GetPace(sessionWindow, DateTimeOffset.UtcNow);
             SessionResetTooltip = session.ResetsAtFull;
             SessionResetCountdown = FormatCountdown(session.ResetsAtUtc);
         }
@@ -373,7 +375,7 @@ public sealed partial class HeaderViewModel : ViewModelBase
         {
             HasPeriodUsage = true;
             WeekUsageDisplay = $"Week {week.PercentUsed}%";
-            IsWeekUsageCritical = week.PercentUsed >= 90;
+            WeekPace = week.GetPace(weekWindow, DateTimeOffset.UtcNow);
             WeekResetTooltip = week.ResetsAtFull;
             WeekResetCountdown = FormatCountdown(week.ResetsAtUtc);
         }

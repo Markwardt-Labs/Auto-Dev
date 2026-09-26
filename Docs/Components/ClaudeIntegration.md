@@ -68,8 +68,10 @@ reset of "Jan 3" read in late December is next year's). Each query is bounded by
 one just leaves the last values on screen. `HeaderViewModel` polls this every 60 seconds for the header's
 `Session X% / Week Y%` indicators, colored by *pace* (`UsagePeriodStatus.GetPace`): percent used minus
 percent of the window (5h session / 7-day week) already elapsed - within ±5 points is even (muted),
-5+ points off is low (blue) / high (orange), and 10+ very low (green) / very high (red) - mid-window
-that's 45%/55% and 40%/60%; an exhausted limit is always very high - unrelated to, and a separate service
+5-15 points under is low (blue) and beyond that very low (green), 5-15 over is high (orange) and beyond that
+very high (red) - mid-window that's 45-55% even, 35-45% blue, under 35% green, 55-65% orange, over 65%
+red. There's no minimum usage (0% used well into the window is already green); an exhausted limit is
+always very high - unrelated to, and a separate service
 from, `IUsageAggregatorService`, which instead rolls up cumulative token/cost usage across every
 session/run this app instance has driven, for internal accounting.
 

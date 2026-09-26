@@ -5,7 +5,9 @@ public sealed record UsagePeriodStatus(int PercentUsed, string ResetsAtDisplay, 
 {
     /// <summary>
     /// Compares percent used against percent of the window elapsed (an even pace is the two matching, e.g. 50%
-    /// used 2.5h into a 5h window): 5 or more points apart is Low/High, 10 or more is VeryLow/VeryHigh (mid-window: 45%/55% and 40%/60%).
+    /// used 2.5h into a 5h window), with no minimum usage - 0% used well into the window is already a low pace.
+    /// Within 5 points is Even, 5-15 points under is Low and beyond that VeryLow, 5-15 over is High and beyond
+    /// that VeryHigh (mid-window: 45-55% even, 35-45% low, under 35% very low, 55-65% high, over 65% very high).
     /// An exhausted limit is always VeryHigh; an unknown or already-passed reset time can't be judged and is Even.
     /// </summary>
     /// <param name="window">Total length of this limit's reset window (5 hours for a session, 7 days for a week).</param>
@@ -24,12 +26,12 @@ public sealed record UsagePeriodStatus(int PercentUsed, string ResetsAtDisplay, 
         }
 
         double elapsedPercent = Math.Clamp((window - (resetsAt - now)) / window * 100, 0, 100);
-        return (PercentUsed - elapsedPercent) switch
+        return Math.Round(PercentUsed - elapsedPercent, 6) switch
         {
-            <= -10 => UsagePace.VeryLow,
-            <= -5 => UsagePace.Low,
-            < 5 => UsagePace.Even,
-            < 10 => UsagePace.High,
+            < -15 => UsagePace.VeryLow,
+            < -5 => UsagePace.Low,
+            <= 5 => UsagePace.Even,
+            <= 15 => UsagePace.High,
             _ => UsagePace.VeryHigh,
         };
     }

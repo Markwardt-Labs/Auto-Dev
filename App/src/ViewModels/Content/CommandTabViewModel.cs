@@ -91,6 +91,11 @@ public sealed partial class CommandTabViewModel(string workspacePath, ICommandEx
         {
             AppendLine("[stopped]");
         }
+        catch (Exception ex)
+        {
+            // e.g. the working directory was deleted, or the shell couldn't be launched.
+            AppendLine($"[failed to run: {ex.Message}]");
+        }
         finally
         {
             IsRunning = false;

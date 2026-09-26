@@ -103,6 +103,12 @@ new folder, or a clone that already had local-only files) is left as pending, un
 instead of being silently swept into that first commit - the user commits it explicitly afterward,
 same as any other edit.
 
+The "scaffold from a template?" offer follows that same initialization, and is also made once for an
+already-initialized workspace that is still completely empty - typically a clone of a remote whose only
+commit is exactly that empty "Initial commit" (`IWorkspaceVersioningService.ShouldOfferTemplateAsync`: no
+tracked files at HEAD, no working-tree changes, and no `.autodev/local/template-offered` marker, which
+`MarkTemplateOfferedAsync` writes so a declined offer isn't repeated on every open).
+
 ## The Version sidebar (`VersionSectionViewModel`)
 
 A passive display plus one click-to-open menu. It shows whatever `GitTarget Target` currently is
@@ -169,7 +175,10 @@ is the one place all of this fetch/prune/resync logic actually lives - `RefreshA
 
 - Every local branch *other* than the checked-out one is hard-reset to match its own
   `origin/{branch}` wherever they differ - the checked-out branch is deliberately never touched this
-  way, so local work in progress on it is never silently overwritten by someone else's push.
+  way, so local work in progress on it is never silently overwritten by someone else's push. A branch
+  is only reset if it had nothing unpushed: it matched `origin/{branch}` before the fetch, or it's an
+  ancestor of the new remote tip. One carrying its own commits (e.g. a commit whose push failed while
+  offline, before switching away) is left alone rather than orphaning them.
 - If the checked-out branch's *own* remote counterpart is what the prune just removed (e.g. someone
   else - or this app's own post-merge cleanup, see "Actions" below - deleted it on the remote while
   it was still checked out here), it's detached at exactly the commit it was already on (a no-op
@@ -226,8 +235,11 @@ accept a trailing `CancellationToken`) - all the way down to `GitService.RunAsyn
 subprocess, not just race to be first past a check. `RunBusyAsync` catches the resulting
 `OperationCanceledException` and calls `RevertToSnapshotAsync(snapshot)` - a generic, action-agnostic
 undo: abort any in-progress rebase/merge, check out the pre-action branch again if a different one
-ended up checked out, then hard-reset it back to the pre-action commit hash and discard pending
-changes. It doesn't know or care which specific action it's undoing; every mutating action's own
+ended up checked out, then move it back to the pre-action commit hash. The snapshot also records
+whether there were pending changes: only a snapshot taken from a clean tree is hard-reset (with
+`git clean`, removing anything the action itself left behind); otherwise a mixed reset moves the branch
+while leaving every file as it is, so cancelling never discards work that was pending before the action
+started. It doesn't know or care which specific action it's undoing; every mutating action's own
 effect reduces to "the checked-out branch moved and/or its tip advanced", which this reverses -
 cancelling closes the overlay immediately once reverted, the same as it always has (the user's own
 Cancel click already *is* their acknowledgement, so there's nothing for a Confirm step to add here).
@@ -338,7 +350,8 @@ inside `RunBusyAsync`, which keeps its own busy overlay up for whatever git work
 `false` for `PullWithStashIfNeededAsync` (called with no such overlay at all, so it stays overlay-free
 once conflict resolution finishes rather than getting stuck open). On success the branch is
 force-pushed (`MarkFailed` if that push itself fails - the rebase/merge already succeeded locally by
-that point) - and, for `MergeIntoCurrentAsync` specifically, the now-merged source branch is then
+that point; a merge only adds commits, so `MergeIntoCurrentAsync` uses a normal push rather than a
+forced one) - and, for `MergeIntoCurrentAsync` specifically, the now-merged source branch is then
 also deleted both locally and on the remote, same as a conflict-free merge; on exhausted attempts
 the operation is aborted (`AbortRebaseAsync`/`AbortMergeAsync`) and `MarkFailed` explains it
 couldn't be resolved automatically, keeping the busy overlay (and its log) up until the user

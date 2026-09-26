@@ -100,9 +100,11 @@ those - and which should always be reflected immediately rather than waiting on 
 results against existing `FileTreeNodeViewModel`s by path (add/remove only what actually changed,
 so unrelated expanded state survives a refresh) and re-applies which `.cs` files are currently
 "running" since a refresh recreates node instances.
-Mutating commands (`NewFileAsync`, `NewFolderAsync`, `RenameAsync`, `DeleteAsync`, `Duplicate`,
+Mutating commands (`NewFileAsync`, `NewFolderAsync`, `RenameAsync`, `DeleteAsync`, `DuplicateAsync`,
 drag-and-drop `MoveExternalItemsAsync`) are gated on `CanMutate`/`CanMutateNode`, which require a
-branch actually being targeted and no interaction-blocking action in flight.
+branch actually being targeted and no interaction-blocking action in flight. A filesystem failure (the
+name is taken, no permission, ...) is shown as a message rather than escaping the command, and Rename
+rejects a name containing a path separator, which would move the item instead.
 
 **File-tree change detection** is `src/Core/Services/FileSystemWatcherAdapter`, wrapping a single
 `System.IO.FileSystemWatcher` per workspace (`IncludeSubdirectories = true`) with a 250ms debounce

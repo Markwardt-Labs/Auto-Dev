@@ -4,7 +4,7 @@ using AutoDev.ViewModels.Dialogs;
 
 namespace AutoDev.Views.Dialogs;
 
-public partial class ConfirmDialogWindow : Window
+public sealed partial class ConfirmDialogWindow : Window
 {
     public ConfirmDialogWindow()
     {

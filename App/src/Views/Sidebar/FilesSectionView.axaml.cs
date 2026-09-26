@@ -7,7 +7,7 @@ using AutoDev.ViewModels.Sidebar;
 
 namespace AutoDev.Views.Sidebar;
 
-public partial class FilesSectionView : UserControl
+public sealed partial class FilesSectionView : UserControl
 {
     /// <summary>How far the pointer must move (in DIPs) past a row's PointerPressed before it counts as a drag rather than a click - keeps an ordinary click/select from ever misfiring DoDragDropAsync.</summary>
     private static readonly double dragStartThreshold = 4;

@@ -7,7 +7,7 @@ using AutoDev.ViewModels.Content;
 
 namespace AutoDev.Views.Content;
 
-public partial class ScriptTabView : UserControl
+public sealed partial class ScriptTabView : UserControl
 {
     /// <summary>How close to the bottom (in pixels) still counts as "at the bottom" for IsScrolledToBottom - a small allowance for sub-pixel/rounding slack in ScrollViewer's own Offset/Extent/Viewport, rather than demanding exact equality.</summary>
     private static readonly double bottomTolerance = 2.0;

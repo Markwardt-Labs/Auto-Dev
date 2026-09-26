@@ -189,12 +189,21 @@ public sealed partial class VersionSectionViewModel : ViewModelBase, IDisposable
             // from a template makes sense for. Skipped if InitializeRepoAsync itself failed.
             if (!IsBusyFailed)
             {
+                await versioningService.MarkTemplateOfferedAsync();
                 await OfferScaffoldFromTemplateAsync();
             }
         }
         else
         {
             await RefreshAsync();
+
+            // A clone of a repo that already has commits, but only empty ones (AutoDev's own "Initial commit"
+            // creates exactly that on a remote), never reaches the branch above - offered once here instead.
+            if (await versioningService.ShouldOfferTemplateAsync())
+            {
+                await versioningService.MarkTemplateOfferedAsync();
+                await OfferScaffoldFromTemplateAsync();
+            }
 
             // Catches the local-exclude pattern for a repo that predates it, or a newer AutoDev build adding
             // to it - a no-op (pure .git/info/exclude bookkeeping, outside the working tree) if already present.
@@ -626,6 +635,10 @@ public sealed partial class VersionSectionViewModel : ViewModelBase, IDisposable
             {
                 MarkFailed($"A branch named \"{trimmedName}\" already exists.");
             }
+            else if (outcome == BranchCreationOutcome.InvalidName)
+            {
+                MarkFailed($"\"{trimmedName}\" isn't a valid branch name.");
+            }
         });
     }
 
@@ -646,6 +659,10 @@ public sealed partial class VersionSectionViewModel : ViewModelBase, IDisposable
             if (outcome == TagCreationOutcome.IdAlreadyExists)
             {
                 MarkFailed($"A tag named \"{trimmedName}\" already exists.");
+            }
+            else if (outcome == TagCreationOutcome.InvalidName)
+            {
+                MarkFailed($"\"{trimmedName}\" isn't a valid tag name.");
             }
         });
     }
@@ -683,7 +700,12 @@ public sealed partial class VersionSectionViewModel : ViewModelBase, IDisposable
 
         await RunBusyAsync(async ct =>
         {
-            if (!await versioningService.SquashAsync(result.BaseBranch, result.Message.Trim(), ct))
+            SquashOutcome outcome = await versioningService.SquashAsync(result.BaseBranch, result.Message.Trim(), ct);
+            if (outcome == SquashOutcome.SquashFailed)
+            {
+                MarkFailed("Squash failed - the branch was left unchanged.");
+            }
+            else if (outcome == SquashOutcome.PushFailed)
             {
                 MarkFailed("Squash succeeded locally, but pushing it to the remote failed.");
             }
@@ -753,7 +775,7 @@ public sealed partial class VersionSectionViewModel : ViewModelBase, IDisposable
             bool succeeded = await versioningService.FastForwardMergeAsync(result.TargetBranch, result.SquashMessage?.Trim(), ct);
             if (!succeeded)
             {
-                MarkFailed($"'{originalBranch}' isn't based on the head of '{result.TargetBranch}' - can't fast-forward.");
+                MarkFailed($"Couldn't fast-forward '{result.TargetBranch}' to '{originalBranch}' - it must be based on the head of '{result.TargetBranch}', and pending changes must not block switching to it.");
                 return;
             }
 

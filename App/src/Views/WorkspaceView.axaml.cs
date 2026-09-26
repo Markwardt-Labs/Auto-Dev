@@ -10,7 +10,7 @@ using AutoDev.ViewModels.Sidebar;
 
 namespace AutoDev.Views;
 
-public partial class WorkspaceView : UserControl
+public sealed partial class WorkspaceView : UserControl
 {
     private readonly TextBox? searchBox;
     private readonly ScrollViewer? gitLogScroll;

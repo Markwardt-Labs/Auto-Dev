@@ -7,7 +7,7 @@ using AutoDev.ViewModels.Content;
 
 namespace AutoDev.Views.Content;
 
-public partial class HistoryTabView : UserControl
+public sealed partial class HistoryTabView : UserControl
 {
     public HistoryTabView()
     {

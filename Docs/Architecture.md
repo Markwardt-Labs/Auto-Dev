@@ -30,7 +30,10 @@ machine) restarts. This is a load-bearing setting, not cosmetic - keep it set on
    `MainWindowViewModel.ShutdownAsync()` (disposes the open workspace, if any); the resulting
    second request actually shuts down.
 4. Registers `AppDomain.CurrentDomain.ProcessExit` as a backstop that disposes the DI container
-   directly, for exit paths (SIGTERM, a crash) that never reach `ShutdownRequested`.
+   directly, for exit paths (SIGTERM, a crash) that never reach `ShutdownRequested`, and
+   `Dispatcher.UIThread.UnhandledException` as the backstop for any exception escaping an async command
+   or event handler - logged and shown as a message (one at a time) instead of taking down the app along
+   with an in-flight AI turn and unsaved edits.
 5. Kicks off `MainWindowViewModel.InitializeAsync()` (auth check, then account/recent-workspaces
    refresh) fire-and-forget once the window is showing - the window always starts with no
    workspace open.
@@ -184,4 +187,8 @@ Two separate, deliberately-scoped persistence layers:
   so it never shows up as a change to commit - see `EnsureLocalGitExcludeAsync`.
 
 Both stores tolerate corruption/missing files by falling back to empty defaults rather than
-throwing, and both filter stale entries against `Directory.Exists` on load.
+throwing, and both filter stale entries against `Directory.Exists` on load. Because of that fallback,
+every write is atomic (`AtomicJsonFile`: a sibling temp file renamed over the target) - a reader, in this
+process or another AutoDev instance sharing `settings.json`, never sees a half-written file, which it
+would read as empty and then save back over everything. The metadata store also serializes each
+load-modify-save of its shared per-workspace files, since several saves run without being awaited.

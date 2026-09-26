@@ -83,7 +83,8 @@ Split by concern rather than one monolithic file:
 - **`ControlStyles.axaml`** - the actual `Style Selector="..."` rules restyling built-in Avalonia
   controls: `Window`, `TextBlock`/`SelectableTextBlock`, `Button` (plus `.accent`/`.danger`/
   `.iconButton`/`.active`/`.sidebarAction`/`.sidebarHeading` classes), `ToggleButton`,
-  `TabControl`/`TabItem` (including the `PART_SelectedPipe` underline), `TreeViewItem`, `TextBox`,
+  `TabControl`/`TabItem` (including the `PART_SelectedPipe` underline), `TreeViewItem`, `TextBox` (with the
+  Inter font's contextual alternates turned off, so typed `->`/`=>` isn't drawn as a single arrow glyph),
   `ListBox`, and a few semantic classes like `TextBlock.usageText[Tag=...]` (pace colors) and
   `TextBlock.tabTitle.aiWorking`.
 

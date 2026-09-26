@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Threading;
 using AutoDev.Infrastructure;
 using AutoDev.AiCli;
 using AutoDev.ClaudeCli;
@@ -13,11 +14,12 @@ using Microsoft.Extensions.Logging;
 
 namespace AutoDev;
 
-public partial class App : Application
+public sealed partial class App : Application
 {
     private ServiceProvider? services;
     private MainWindowViewModel? mainWindowViewModel;
     private bool shutdownConfirmed;
+    private bool isShowingUnhandledError;
 
     public override void Initialize()
     {
@@ -35,6 +37,7 @@ public partial class App : Application
             desktop.MainWindow = window;
 
             desktop.ShutdownRequested += OnShutdownRequested;
+            Dispatcher.UIThread.UnhandledException += OnDispatcherUnhandledException;
 
             // Backstop for any exit path that never reaches OnShutdownRequested at all - a caught
             // termination signal (SIGTERM, not the unstoppable SIGKILL) or an unhandled-exception crash
@@ -72,6 +75,40 @@ public partial class App : Application
     }
 
     private void DisposeServices() => services?.Dispose();
+
+    /// <summary>
+    /// The backstop for anything escaping an async command or event handler - otherwise any unexpected
+    /// exception (an I/O error, a process that died mid-write, ...) took down the whole app, losing an in-flight
+    /// AI turn and unsaved edits along with it. Logged and shown instead; only one message at a time, so an
+    /// exception that keeps recurring can't stack up dialogs.
+    /// </summary>
+    private void OnDispatcherUnhandledException(object? sender, DispatcherUnhandledExceptionEventArgs e)
+    {
+        e.Handled = true;
+        services?.GetService<ILogger<App>>()?.LogError(e.Exception, "Unhandled exception on the UI thread");
+
+        if (isShowingUnhandledError || services?.GetService<IDialogService>() is not { } dialogService)
+        {
+            return;
+        }
+
+        isShowingUnhandledError = true;
+        Dispatcher.UIThread.Post(async () =>
+        {
+            try
+            {
+                await dialogService.ShowMessageDialogAsync("Unexpected Error", e.Exception.Message);
+            }
+            catch (Exception ex)
+            {
+                services?.GetService<ILogger<App>>()?.LogError(ex, "Failed to show the unexpected-error message");
+            }
+            finally
+            {
+                isShowingUnhandledError = false;
+            }
+        });
+    }
 
     private static ServiceProvider BuildServiceProvider()
     {

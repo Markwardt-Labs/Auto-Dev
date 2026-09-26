@@ -4,7 +4,7 @@ using AutoDev.ViewModels.Dialogs;
 
 namespace AutoDev.Views.Dialogs;
 
-public partial class GitIdentityDialogWindow : Window
+public sealed partial class GitIdentityDialogWindow : Window
 {
     public GitIdentityDialogWindow()
     {

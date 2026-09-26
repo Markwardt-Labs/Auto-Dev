@@ -26,6 +26,9 @@ public sealed class GitService : IGitService
     public async Task<bool> HasCommitsAsync(string workspacePath, CancellationToken cancellationToken = default) =>
         (await RunAsync(workspacePath, ["rev-parse", "--verify", "--quiet", "HEAD"], cancellationToken)).ExitCode == 0;
 
+    public async Task<bool> HasTrackedFilesAsync(string workspacePath, CancellationToken cancellationToken = default) =>
+        (await RunAsync(workspacePath, ["ls-tree", "-r", "--name-only", "HEAD"], cancellationToken)).StandardOutput.Trim().Length > 0;
+
     public async Task InitAsync(string workspacePath, CancellationToken cancellationToken = default) =>
         await RunAsync(workspacePath, ["init"], cancellationToken);
 
@@ -262,6 +265,11 @@ public sealed class GitService : IGitService
         HashSet<string> names = new HashSet<string>(SplitLines(local.StandardOutput));
         foreach (string name in SplitLines(remote.StandardOutput))
         {
+            if (name == "origin")
+            {
+                continue; // the short form of the origin/HEAD symref, not a branch
+            }
+
             names.Add(name.StartsWith("origin/", StringComparison.Ordinal) ? name["origin/".Length..] : name);
         }
 
@@ -279,8 +287,8 @@ public sealed class GitService : IGitService
         await RunAsync(workspacePath, ["branch", branchName, $"origin/{branchName}"], cancellationToken);
     }
 
-    public async Task CreateBranchAsync(string workspacePath, string branchName, string fromRef, CancellationToken cancellationToken = default) =>
-        await RunAsync(workspacePath, ["branch", branchName, fromRef], cancellationToken);
+    public async Task<bool> CreateBranchAsync(string workspacePath, string branchName, string fromRef, CancellationToken cancellationToken = default) =>
+        (await RunAsync(workspacePath, ["branch", "--", branchName, fromRef], cancellationToken)).ExitCode == 0;
 
     public async Task DeleteBranchAsync(string workspacePath, string branchName, CancellationToken cancellationToken = default) =>
         await RunAsync(workspacePath, ["branch", "-D", branchName], cancellationToken);
@@ -319,8 +327,8 @@ public sealed class GitService : IGitService
     public async Task ForceUpdateBranchRefAsync(string workspacePath, string branchName, string targetRef, CancellationToken cancellationToken = default) =>
         await RunAsync(workspacePath, ["branch", "-f", branchName, targetRef], cancellationToken);
 
-    public async Task CreateAnnotatedTagAsync(string workspacePath, string name, string atRef, CancellationToken cancellationToken = default) =>
-        await RunAsync(workspacePath, ["tag", "-a", name, "-m", "", atRef], cancellationToken);
+    public async Task<bool> CreateAnnotatedTagAsync(string workspacePath, string name, string atRef, CancellationToken cancellationToken = default) =>
+        (await RunAsync(workspacePath, ["tag", "-a", "-m", "", "--", name, atRef], cancellationToken)).ExitCode == 0;
 
     public async Task<GitOperationOutcome> RebaseOntoAsync(string workspacePath, string ontoRef, CancellationToken cancellationToken = default)
     {
@@ -447,10 +455,23 @@ public sealed class GitService : IGitService
         return result.StandardOutput.Trim();
     }
 
-    public async Task SquashSinceAsync(string workspacePath, string sinceRef, string message, CancellationToken cancellationToken = default)
+    public async Task<bool> SquashSinceAsync(string workspacePath, string sinceRef, string message, CancellationToken cancellationToken = default)
     {
-        await RunAsync(workspacePath, ["reset", "--soft", sinceRef], cancellationToken);
-        await RunAsync(workspacePath, ["commit", "-m", message], cancellationToken);
+        string originalHead = await RevParseAsync(workspacePath, "HEAD", cancellationToken);
+        if ((await RunAsync(workspacePath, ["reset", "--soft", sinceRef], cancellationToken)).ExitCode != 0)
+        {
+            return false;
+        }
+
+        if ((await RunAsync(workspacePath, ["commit", "-m", message], cancellationToken)).ExitCode == 0)
+        {
+            return true;
+        }
+
+        // The soft reset already moved the branch - put it back so a failed commit (a hook, nothing to
+        // commit, ...) doesn't leave the squashed-away commits unreachable from the branch.
+        await RunAsync(workspacePath, ["reset", "--soft", originalHead], cancellationToken);
+        return false;
     }
 
     public async Task<bool> StashPushAsync(string workspacePath, CancellationToken cancellationToken = default)
@@ -470,19 +491,21 @@ public sealed class GitService : IGitService
 
     public async Task<string> RevParseAsync(string workspacePath, string refName, CancellationToken cancellationToken = default)
     {
+        // On failure `git rev-parse` echoes the unresolved argument back to stdout, so the exit code is what
+        // distinguishes "resolved" from "doesn't exist".
         BufferedCommandResult result = await RunAsync(workspacePath, ["rev-parse", refName], cancellationToken);
-        return result.StandardOutput.Trim();
+        return result.ExitCode == 0 ? result.StandardOutput.Trim() : "";
     }
 
     public async Task<string> GetCommitSubjectAsync(string workspacePath, string refName, CancellationToken cancellationToken = default)
     {
-        BufferedCommandResult result = await RunAsync(workspacePath, ["log", "-1", "--format=%s", refName], cancellationToken);
+        BufferedCommandResult result = await RunAsync(workspacePath, ["log", "-1", "--format=%s", refName, "--"], cancellationToken);
         return result.StandardOutput.Trim();
     }
 
     public async Task<DateTimeOffset> GetCommitDateAsync(string workspacePath, string refName, CancellationToken cancellationToken = default)
     {
-        BufferedCommandResult result = await RunAsync(workspacePath, ["log", "-1", "--format=%cI", refName], cancellationToken);
+        BufferedCommandResult result = await RunAsync(workspacePath, ["log", "-1", "--format=%cI", refName, "--"], cancellationToken);
         return DateTimeOffset.TryParse(result.StandardOutput.Trim(), out DateTimeOffset date) ? date : DateTimeOffset.MinValue;
     }
 
@@ -630,6 +653,9 @@ public sealed class GitService : IGitService
         await RunAsync(workspacePath, ["clean", "-fd"], cancellationToken);
     }
 
+    public async Task ResetMixedAsync(string workspacePath, string commitHash, CancellationToken cancellationToken = default) =>
+        await RunAsync(workspacePath, ["reset", "--mixed", commitHash], cancellationToken);
+
     public async Task ResetHardAsync(string workspacePath, string commitHash, CancellationToken cancellationToken = default)
     {
         await RunAsync(workspacePath, ["reset", "--hard", commitHash], cancellationToken);
@@ -639,7 +665,8 @@ public sealed class GitService : IGitService
     private static async Task<IReadOnlyList<GitCommit>> LogCommitsAsync(string workspacePath, string revisionRange, CancellationToken cancellationToken)
     {
         char sep = '\x1f';
-        BufferedCommandResult result = await RunAsync(workspacePath, ["log", revisionRange, $"--format=%H{sep}%cI{sep}%s", "--reverse"], cancellationToken);
+        // "--" keeps a branch that shares its name with a file or folder from failing as ambiguous.
+        BufferedCommandResult result = await RunAsync(workspacePath, ["log", revisionRange, $"--format=%H{sep}%cI{sep}%s", "--reverse", "--"], cancellationToken);
 
         List<GitCommit> commits = new List<GitCommit>();
         foreach (string line in SplitLines(result.StandardOutput))

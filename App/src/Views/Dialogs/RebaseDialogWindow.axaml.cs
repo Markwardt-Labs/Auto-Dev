@@ -4,7 +4,7 @@ using AutoDev.ViewModels.Dialogs;
 
 namespace AutoDev.Views.Dialogs;
 
-public partial class RebaseDialogWindow : Window
+public sealed partial class RebaseDialogWindow : Window
 {
     public RebaseDialogWindow()
     {

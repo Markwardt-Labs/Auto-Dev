@@ -63,7 +63,9 @@ Messages API's content-block shape.
 `ClaudeUsageService` reuses the same protocol but as a one-shot buffered invocation: it pipes
 `/usage` in as a user message to a fresh process, and regex-parses the CLI's plain-text usage
 report (there's no structured JSON form of it) for the "Current session"/"Current week" percentage
-and reset-time lines. `HeaderViewModel` polls this every 60 seconds for the header's
+and reset-time lines (the reset text has no year, so it resolves to the next occurrence - a weekly
+reset of "Jan 3" read in late December is next year's). Each query is bounded by a timeout, and a failed
+one just leaves the last values on screen. `HeaderViewModel` polls this every 60 seconds for the header's
 `Session X% / Week Y%` indicators, colored by *pace* (`UsagePeriodStatus.GetPace`): percent used minus
 percent of the window (5h session / 7-day week) already elapsed - within ±5 points is even (muted),
 5+ points off is low (blue) / high (orange), and 10+ very low (green) / very high (red) - mid-window
@@ -85,7 +87,9 @@ persisted to disk and to the CLI's own on-disk transcript. If that transcript no
 `--resume` would just emit an error result and exit, which showed as an instantly "completed" empty
 request), `ClaudeSessionClient.Start` falls back to a fresh session instead; and once a client's event
 stream ends, the Generate tab detaches it so the next send starts a new subprocess rather than writing to
-a dead one.
+a dead one. Every send also goes through `TrySendAsync`: if the process exited in between (or never
+launched), the failed write detaches the client and ends the waiting turn the same way, rather than
+escaping the command.
 
 ### Turn lifecycle
 
@@ -144,7 +148,8 @@ Three buttons cover stopping a turn, each doing something different:
 
 Closing the app or workspace mid-turn is treated exactly like an explicit Pause rather than losing
 the turn to a silent Cancel, however it happens: `DisposeAsync` marks a still-`Working` active
-request `Paused` and persists immediately (a normal clean close reaches this); an unclean
+request `Paused` and persists immediately, along with the live session id so Resume after a restart
+continues the same conversation (a normal clean close reaches this); an unclean
 crash/kill never gets the chance, so the request is left sitting on disk exactly as `SendAsync`
 first persisted it - `Working` - and `SwitchSessionAsync`'s loader coerces that stale `Working`
 status to `Paused` on the next load instead (rather than `Cancelled`, which only ever applies to a

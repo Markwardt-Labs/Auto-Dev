@@ -327,7 +327,7 @@ public sealed partial class HeaderViewModel : ViewModelBase
         null or "" => "",
         "pro" => "Pro",
         "max" => "Max",
-        var other => other,
+        _ => subscriptionType,
     };
 
     private async Task PollUsageLoopAsync()
@@ -348,7 +348,17 @@ public sealed partial class HeaderViewModel : ViewModelBase
     private async Task RefreshUsageLimitsAsync()
     {
         IAiUsageService usageService = usageServices.First(s => s.Provider == CurrentProvider);
-        UsageLimitStatus? status = await usageService.GetUsageStatusAsync();
+        UsageLimitStatus? status;
+        try
+        {
+            status = await usageService.GetUsageStatusAsync();
+        }
+        catch (Exception)
+        {
+            // PollUsageLoopAsync is fire-and-forget - one failed query must never end polling for the rest of the session.
+            return;
+        }
+
         dispatcher.Post(() => ApplyUsageStatus(status));
     }
 

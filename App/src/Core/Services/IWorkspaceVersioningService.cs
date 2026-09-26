@@ -6,12 +6,30 @@ public enum BranchCreationOutcome
 {
     Created,
     IdAlreadyExists,
+
+    /// <summary>git rejected the name itself (e.g. it contains a space or starts with "-").</summary>
+    InvalidName,
 }
 
 public enum TagCreationOutcome
 {
     Created,
     IdAlreadyExists,
+
+    /// <summary>git rejected the name itself (e.g. it contains a space or starts with "-").</summary>
+    InvalidName,
+}
+
+/// <summary>The outcome of IWorkspaceVersioningService.SquashAsync.</summary>
+public enum SquashOutcome
+{
+    Succeeded,
+
+    /// <summary>The squash commit itself failed - the branch was left exactly where it was, nothing pushed.</summary>
+    SquashFailed,
+
+    /// <summary>Squashed locally, but the force-push to the remote failed.</summary>
+    PushFailed,
 }
 
 /// <summary>The outcome of IWorkspaceVersioningService.PullCurrentBranchWithStashAsync.</summary>
@@ -44,6 +62,12 @@ public interface IWorkspaceVersioningService
     /// <summary>False both for a plain folder with no .git yet AND for an existing git work tree with no commits (e.g. a fresh `git clone` of an empty remote) - either way, EnsureRepoAsync routes to InitializeRepoAsync so both end up with the same initial "main" branch.</summary>
     Task<bool> IsRepoInitializedAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>True for an already-initialized workspace that's still completely empty (no tracked files at HEAD, nothing else in the working tree) and whose template offer hasn't been made yet - e.g. a fresh clone of a repo whose only commit is an empty "Initial commit", which IsRepoInitializedAsync alone can't tell apart from a real project. See MarkTemplateOfferedAsync.</summary>
+    Task<bool> ShouldOfferTemplateAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Records (in `.autodev/local/`, so per clone) that the empty-workspace template offer has been made, so a declined offer isn't repeated on every open.</summary>
+    Task MarkTemplateOfferedAsync(CancellationToken cancellationToken = default);
+
     /// <summary>See IGitService.HasUserIdentityConfiguredAsync - checked by VersionSectionViewModel.RunBusyAsync before every action, since any of them might need to create a commit.</summary>
     Task<bool> HasUserIdentityConfiguredAsync(CancellationToken cancellationToken = default);
 
@@ -70,10 +94,10 @@ public interface IWorkspaceVersioningService
     /// <summary>Fetches (+prunes deleted remote branches), then hard-resets every local branch OTHER than the currently checked-out one to match its remote-tracking counterpart wherever they differ - so local work in progress on the checked-out branch is never silently overwritten this way. If the checked-out branch's own remote counterpart is what got pruned (deleted on the remote, e.g. by this app's own post-merge cleanup - see VersionSectionViewModel.MergeAsync), that branch is detached (checked out by commit hash, so pending changes are untouched) and then deleted locally too, rather than left pointing at nothing. Best-effort - a missing/unreachable remote is silently ignored, same tolerance as every other remote call here.</summary>
     Task SyncWithRemoteAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>The checked-out branch (if any) and HEAD's own commit hash, right before a mutating busy action starts - see RevertToSnapshotAsync, which the busy overlay's Cancel button uses to undo whatever the action had done so far.</summary>
+    /// <summary>The checked-out branch (if any), HEAD's own commit hash, and whether there were pending changes, right before a mutating busy action starts - see RevertToSnapshotAsync, which the busy overlay's Cancel button uses to undo whatever the action had done so far.</summary>
     Task<GitActionSnapshot> CaptureSnapshotAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Best-effort undo back to `snapshot`: aborts an in-progress rebase/merge if there is one, checks out `snapshot.Branch` again if a different branch ended up checked out, then hard-resets it to `snapshot.CommitHash` and discards any pending changes. Doesn't know or care which specific action it's undoing - every mutating action's own effects reduce to "the checked-out branch moved and/or its tip advanced", which this reverses generically.</summary>
+    /// <summary>Best-effort undo back to `snapshot`: aborts an in-progress rebase/merge if there is one, checks out `snapshot.Branch` again if a different branch ended up checked out, then moves it back to `snapshot.CommitHash`. Pending changes that existed before the action are never discarded: only a snapshot taken with a clean working tree is hard-reset (removing anything the action itself left behind); otherwise the branch is moved with a mixed reset that leaves every file as it is. Doesn't know or care which specific action it's undoing - every mutating action's own effects reduce to "the checked-out branch moved and/or its tip advanced", which this reverses generically.</summary>
     Task RevertToSnapshotAsync(GitActionSnapshot snapshot, CancellationToken cancellationToken = default);
 
     // --- History tab actions ---
@@ -146,8 +170,8 @@ public interface IWorkspaceVersioningService
     /// <summary>The subject of the first commit unique to the current branch since diverging from `baseBranch` (i.e. right after their merge-base) - the Squash/Rebase dialogs' own default commit message. Empty if the current branch has no commits of its own since that point.</summary>
     Task<string> GetDefaultSquashMessageAsync(string baseBranch, CancellationToken cancellationToken = default);
 
-    /// <summary>Collapses every commit unique to the current branch since diverging from `baseBranch` into one (see IGitService.SquashSinceAsync), then force-pushes. False if that push failed (see PushCurrentBranchAsync) - the squash itself has already happened locally either way.</summary>
-    Task<bool> SquashAsync(string baseBranch, string message, CancellationToken cancellationToken = default);
+    /// <summary>Collapses every commit unique to the current branch since diverging from `baseBranch` into one (see IGitService.SquashSinceAsync), then force-pushes - see SquashOutcome. Never pushes if the squash itself failed.</summary>
+    Task<SquashOutcome> SquashAsync(string baseBranch, string message, CancellationToken cancellationToken = default);
 
     /// <summary>Rebases the current branch onto `ontoBranch`, always squashing the current branch's own commits since diverging from `ontoBranch` first (see SquashAsync, minus the intermediate push) so only that single commit ever gets replayed - a rebase can't offer a meaningful per-commit conflict-resolution loop otherwise, since AI conflict resolution (see VersionSectionViewModel.ResolveConflictsAsync) only gets one shot at the whole diff, not one per original commit.</summary>
     Task<GitOperationOutcome> RebaseWithSquashAsync(string ontoBranch, string squashMessage, CancellationToken cancellationToken = default);

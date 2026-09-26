@@ -712,14 +712,9 @@ public sealed partial class GenerateTabViewModel : ViewModelBase, IAsyncDisposab
         // stall before anything has had a chance to come back yet.
         lastEventReceivedAt = DateTimeOffset.UtcNow;
 
-        if (images.Count > 0)
-        {
-            await client!.SendUserMessageAsync(outgoingText, images);
-        }
-        else
-        {
-            await client!.SendUserMessageAsync(outgoingText);
-        }
+        await TrySendAsync(sending => images.Count > 0
+            ? sending.SendUserMessageAsync(outgoingText, images)
+            : sending.SendUserMessageAsync(outgoingText));
     }
 
     /// <summary>Starts a brand-new normal turn's tracking - shared by SendAsync's own "not an interjection" branch and SubmitRequestAsync, both of which still need to actually send something themselves afterward (their own outgoing text can differ from displayInput - see SubmitRequestAsync).</summary>
@@ -767,7 +762,7 @@ public sealed partial class GenerateTabViewModel : ViewModelBase, IAsyncDisposab
     {
         BeginNewNormalTurn(displayText);
         lastEventReceivedAt = DateTimeOffset.UtcNow;
-        await client!.SendUserMessageAsync(outgoingText);
+        await TrySendAsync(sending => sending.SendUserMessageAsync(outgoingText));
     }
 
     /// <summary>
@@ -812,7 +807,7 @@ public sealed partial class GenerateTabViewModel : ViewModelBase, IAsyncDisposab
         DisplayedIndex = Requests.Count - 1;
 
         lastEventReceivedAt = DateTimeOffset.UtcNow;
-        await client.SendUserMessageAsync(instruction);
+        await TrySendAsync(sending => sending.SendUserMessageAsync(instruction));
     }
 
     /// <summary>Same gating as CanCancel, minus !_cancelRequested (stopping outright is always fine, even mid-cancel) - also true while the active request is Paused, since Stop is exactly as meaningful there (nothing to kill, but the paused turn still needs to be abandoned and the workspace unlocked). Explicitly excludes an automated turn (see CanCancel) - a merge-conflict-resolution turn can only ever be Paused/Resumed, never Stopped, so forcibly killing it and leaving the repository mid-conflict is never offered.</summary>
@@ -910,7 +905,7 @@ public sealed partial class GenerateTabViewModel : ViewModelBase, IAsyncDisposab
         EnsureClientStarted();
 
         lastEventReceivedAt = DateTimeOffset.UtcNow;
-        await client!.SendUserMessageAsync("Continue from where you left off.");
+        await TrySendAsync(sending => sending.SendUserMessageAsync("Continue from where you left off."));
     }
 
     /// <summary>
@@ -1130,7 +1125,11 @@ public sealed partial class GenerateTabViewModel : ViewModelBase, IAsyncDisposab
 
         try
         {
-            await client!.SendUserMessageAsync(instruction, cancellationToken);
+            if (!await TrySendAsync(sending => sending.SendUserMessageAsync(instruction, cancellationToken)))
+            {
+                return false;
+            }
+
             return await tcs.Task;
         }
         finally
@@ -1149,9 +1148,62 @@ public sealed partial class GenerateTabViewModel : ViewModelBase, IAsyncDisposab
             return;
         }
 
-        client = sessionClientFactory.Create(providerSelection.CurrentProvider, workspacePath, SelectedModel, SelectedEffort == "default" ? null : SelectedEffort);
-        client.Start(resumeSessionId);
-        _ = Task.Run(() => ReadLoopAsync(client));
+        IAiSessionClient created = sessionClientFactory.Create(providerSelection.CurrentProvider, workspacePath, SelectedModel, SelectedEffort == "default" ? null : SelectedEffort);
+        try
+        {
+            created.Start(resumeSessionId);
+        }
+        catch (Exception ex)
+        {
+            // e.g. the CLI executable can't be launched - left with no client, so TrySendAsync ends the turn cleanly.
+            logger.LogError(ex, "Failed to start the AI session for {WorkspacePath}", workspacePath);
+            _ = created.DisposeAsync().AsTask();
+            return;
+        }
+
+        client = created;
+        _ = Task.Run(() => ReadLoopAsync(created));
+    }
+
+    /// <summary>
+    /// Every message to the CLI goes through here. The process can exit at any moment (a failed resume, a
+    /// crash, killed from outside), and writing to its closed stdin throws - unhandled, that took down the whole
+    /// app from an async command. A failed send instead detaches the dead client (the next send starts a fresh
+    /// one, resuming the same session) and ends whatever turn was waiting on it, exactly like the read loop does
+    /// when the event stream ends. False if the message couldn't be delivered.
+    /// </summary>
+    private async Task<bool> TrySendAsync(Func<IAiSessionClient, Task> send)
+    {
+        IAiSessionClient? sending = client;
+        if (sending is not null)
+        {
+            try
+            {
+                await send(sending);
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or ObjectDisposedException)
+            {
+                logger.LogWarning(ex, "Failed to send to the AI session for {WorkspacePath}", workspacePath);
+            }
+
+            if (!ReferenceEquals(client, sending))
+            {
+                return false; // already replaced/detached elsewhere while this send was in flight
+            }
+
+            resumeSessionId = sending.SessionId;
+            client = null;
+            _ = sending.DisposeAsync().AsTask();
+        }
+
+        if (lastActiveRequestSegment.Length == 0)
+        {
+            lastActiveRequestSegment = "Couldn't reach the AI process - send again to start a fresh one.";
+        }
+
+        await FinalizeAbandonedTurnAsync();
+        return false;
     }
 
     /// <summary>
@@ -1485,6 +1537,10 @@ public sealed partial class GenerateTabViewModel : ViewModelBase, IAsyncDisposab
         // Paused is left alone - it's already correctly persisted from the moment PauseAsync ran.
         if (activeRequest is { Status: GenerateRequestStatus.Working } workingRequest)
         {
+            // The session id is otherwise only saved once a turn's ResultEvent arrives - without this, a
+            // first turn interrupted by closing the app would resume after restart with no conversation
+            // context at all ("Continue from where you left off." sent to a brand-new session).
+            await PersistSessionIdAsync();
             workingRequest.Status = GenerateRequestStatus.Paused;
             await PersistCurrentRequestsAsync();
         }

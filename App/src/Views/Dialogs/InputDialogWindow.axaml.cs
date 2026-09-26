@@ -4,7 +4,7 @@ using AutoDev.ViewModels.Dialogs;
 
 namespace AutoDev.Views.Dialogs;
 
-public partial class InputDialogWindow : Window
+public sealed partial class InputDialogWindow : Window
 {
     private bool closeAllowed;
 

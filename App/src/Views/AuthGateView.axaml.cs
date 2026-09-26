@@ -5,7 +5,7 @@ using Avalonia.VisualTree;
 
 namespace AutoDev.Views;
 
-public partial class AuthGateView : UserControl
+public sealed partial class AuthGateView : UserControl
 {
     public AuthGateView()
     {

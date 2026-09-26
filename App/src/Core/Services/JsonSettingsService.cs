@@ -7,6 +7,7 @@ namespace AutoDev.Core.Services;
 public sealed class JsonSettingsService : ISettingsService
 {
     private readonly string settingsFilePath;
+    private readonly AtomicJsonFile atomicJsonFile = new();
 
     public JsonSettingsService()
     {
@@ -36,9 +37,7 @@ public sealed class JsonSettingsService : ISettingsService
         }
     }
 
-    public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
-    {
-        await using FileStream stream = File.Create(settingsFilePath);
-        await JsonSerializer.SerializeAsync(stream, settings, AppJson.Options, cancellationToken);
-    }
+    /// <summary>Atomic (see AtomicJsonFile) - settings.json is shared by every running AutoDev instance, and one reading a half-written file would fall back to defaults and then save those over everything.</summary>
+    public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default) =>
+        await atomicJsonFile.WriteAsync(settingsFilePath, settings, cancellationToken);
 }

@@ -21,7 +21,7 @@ using TextMateSharp.Grammars;
 
 namespace AutoDev.Views.Content;
 
-public partial class EditTabView : UserControl
+public sealed partial class EditTabView : UserControl
 {
     private readonly RegistryOptions registryOptions = new(ThemeName.DarkPlus);
     private TextEditor? editor;

@@ -311,7 +311,9 @@ public sealed partial class HistoryTabViewModel : ViewModelBase
             outcome = await version.ResolveConflictsAsync(outcome, ct2 => versioningService.ContinueMergeAsync(ct2), ct);
             if (outcome == GitOperationOutcome.Succeeded)
             {
-                if (!await versioningService.PushCurrentBranchAsync(force: true, ct))
+                // A merge only adds commits, so a normal push suffices - forcing it would overwrite anything
+                // pushed to this branch from elsewhere since the last fetch.
+                if (!await versioningService.PushCurrentBranchAsync(force: false, ct))
                 {
                     version.MarkFailed("Merge succeeded locally, but pushing it to the remote failed.");
                     return;

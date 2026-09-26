@@ -12,6 +12,7 @@ public sealed partial class MainShellViewModel : ViewModelBase
     private readonly IWorkspaceFactory workspaceFactory;
     private readonly IDialogService dialogService;
     private readonly ILogger<MainShellViewModel> logger;
+    private readonly SemaphoreSlim workspaceSwitchLock = new(1, 1);
 
     public MainShellViewModel(HeaderViewModel header, IWorkspaceFactory workspaceFactory, IDialogService dialogService, ILogger<MainShellViewModel> logger)
     {
@@ -54,30 +55,39 @@ public sealed partial class MainShellViewModel : ViewModelBase
         }
     }
 
+    /// <summary>Serialized - two opens in quick succession would otherwise both dispose the same outgoing workspace, and the first one they each create would be replaced without ever being disposed, leaving its watchers, timers and AI process running.</summary>
     private async void OnWorkspaceOpened((WorkspaceInfo Workspace, bool ForceReload) args)
     {
         (WorkspaceInfo workspace, bool forceReload) = args;
 
-        if (Workspace is { } existing)
+        await workspaceSwitchLock.WaitAsync();
+        try
         {
-            if (existing.Workspace.FullPath == workspace.FullPath && !forceReload)
+            if (Workspace is { } existing)
             {
-                return;
+                if (existing.Workspace.FullPath == workspace.FullPath && !forceReload)
+                {
+                    return;
+                }
+
+                try
+                {
+                    await existing.DisposeAsync();
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Failed to fully dispose workspace {WorkspacePath} while replacing it", existing.Workspace.FullPath);
+                }
             }
 
-            try
-            {
-                await existing.DisposeAsync();
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to fully dispose workspace {WorkspacePath} while replacing it", existing.Workspace.FullPath);
-            }
+            WorkspaceViewModel opened = workspaceFactory.Create(workspace);
+            Workspace = opened;
+            await opened.InitializeAsync();
         }
-
-        WorkspaceViewModel opened = workspaceFactory.Create(workspace);
-        Workspace = opened;
-        await opened.InitializeAsync();
+        finally
+        {
+            workspaceSwitchLock.Release();
+        }
     }
 
     public async Task ShutdownAsync()

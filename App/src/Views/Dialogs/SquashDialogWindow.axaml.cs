@@ -4,7 +4,7 @@ using AutoDev.ViewModels.Dialogs;
 
 namespace AutoDev.Views.Dialogs;
 
-public partial class SquashDialogWindow : Window
+public sealed partial class SquashDialogWindow : Window
 {
     public SquashDialogWindow()
     {

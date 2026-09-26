@@ -91,7 +91,8 @@ public sealed partial class FileSearchViewModel : ViewModelBase
 
     private async Task LoadFilesAsync(int token)
     {
-        List<string> candidates = EnumerateFiles(workspacePath);
+        // Off the UI thread - a full walk of a large workspace (build output, node_modules, ...) takes seconds.
+        List<string> candidates = await Task.Run(() => EnumerateFiles(workspacePath));
 
         List<string> filtered;
         if (files.ShowIgnoredFiles)

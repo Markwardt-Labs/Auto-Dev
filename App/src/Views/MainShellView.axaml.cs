@@ -9,7 +9,7 @@ using AutoDev.ViewModels;
 
 namespace AutoDev.Views;
 
-public partial class MainShellView : UserControl
+public sealed partial class MainShellView : UserControl
 {
     public MainShellView()
     {

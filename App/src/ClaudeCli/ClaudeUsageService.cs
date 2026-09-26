@@ -24,6 +24,11 @@ public sealed partial class ClaudeUsageService(ILogger<ClaudeUsageService> logge
         Converters = { new ClaudeStreamEventJsonConverter() },
     };
 
+    private static readonly string[] resetsAtFormats = ["MMM d, h:mmtt yyyy", "MMM d, htt yyyy"];
+
+    /// <summary>A `/usage` query normally returns in a few seconds - without a bound, one hung CLI process would stall the header's poll loop (which awaits each query before scheduling the next) for good.</summary>
+    private readonly TimeSpan queryTimeout = TimeSpan.FromSeconds(60);
+
     public AiProvider Provider => AiProvider.Claude;
 
     [GeneratedRegex(@"^(?<pct>\d+)% used · resets (?<resets>.+?)(?:\s*\((?<tz>[^)]+)\))?\s*$")]
@@ -34,11 +39,13 @@ public sealed partial class ClaudeUsageService(ILogger<ClaudeUsageService> logge
         BufferedCommandResult result;
         try
         {
+            using CancellationTokenSource timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(queryTimeout);
             result = await Cli.Wrap(ClaudeCliLocator.ExecutableName)
                 .WithArguments(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--model", "sonnet"])
                 .WithStandardInputPipe(PipeSource.FromString(ClaudeInputMessageWriter.UserMessage("/usage") + "\n"))
                 .WithValidation(CommandResultValidation.None)
-                .ExecuteBufferedAsync(cancellationToken);
+                .ExecuteBufferedAsync(timeoutCts.Token);
         }
         catch (Exception ex)
         {
@@ -54,8 +61,10 @@ public sealed partial class ClaudeUsageService(ILogger<ClaudeUsageService> logge
             {
                 evt = JsonSerializer.Deserialize<AiStreamEvent>(line, jsonOptions);
             }
-            catch (JsonException)
+            catch (Exception)
             {
+                // Not just JsonException - the converter's GetProperty calls throw KeyNotFoundException for a
+                // valid line of an unexpected shape (see ClaudeSessionClient.ReadOutputLoopAsync).
                 continue;
             }
 
@@ -68,11 +77,11 @@ public sealed partial class ClaudeUsageService(ILogger<ClaudeUsageService> logge
         return reportText is null ? null : Parse(reportText);
     }
 
-    private static UsageLimitStatus Parse(string reportText) => new(
+    private UsageLimitStatus Parse(string reportText) => new(
         ExtractPeriod(reportText, "Current session: "),
         ExtractPeriod(reportText, "Current week (all models): "));
 
-    private static UsagePeriodStatus? ExtractPeriod(string reportText, string linePrefix)
+    private UsagePeriodStatus? ExtractPeriod(string reportText, string linePrefix)
     {
         foreach (string line in reportText.Split('\n'))
         {
@@ -91,7 +100,7 @@ public sealed partial class ClaudeUsageService(ILogger<ClaudeUsageService> logge
             string resets = match.Groups["resets"].Value.Trim();
             string? timezone = match.Groups["tz"] is { Success: true } tz ? tz.Value : null;
             string full = timezone is null ? $"Resets {resets}" : $"Resets {resets} ({timezone})";
-            return new UsagePeriodStatus(percent, resets, full, TryParseResetsAtUtc(resets, timezone));
+            return new UsagePeriodStatus(percent, resets, full, TryParseResetsAtUtc(resets, timezone, DateTime.UtcNow));
         }
 
         return null;
@@ -101,19 +110,17 @@ public sealed partial class ClaudeUsageService(ILogger<ClaudeUsageService> logge
     /// Best-effort: the CLI only gives us free text like "Jul 19, 8:50am" or "Jul 25, 2am" (no minutes)
     /// plus an optional IANA zone name like "America/Chicago". Generic DateTime.TryParse mis-parses both
     /// of those shapes (confirmed empirically - e.g. it silently reads "25, 2" as day/two-digit-year and
-    /// drops the time entirely), so this uses explicit format strings instead. Missing year defaults to
-    /// the current year, same as TryParseExact's normal behavior. Returns null (no countdown shown)
+    /// drops the time entirely), so this uses explicit format strings instead. There's no year, so the current
+    /// one is assumed - and moved on a year when that lands clearly in the past, since a reset is always
+    /// ahead (e.g. a weekly reset of "Jan 3" read on Dec 30). Returns null (no countdown shown)
     /// rather than guessing if either step fails.
     /// </summary>
-    private static readonly string[] resetsAtFormats = ["MMM d, h:mmtt", "MMM d, htt"];
-
-    private static DateTimeOffset? TryParseResetsAtUtc(string resets, string? timezone)
+    /// <param name="resets">The CLI's own reset text, e.g. "Jul 19, 8:50am".</param>
+    /// <param name="timezone">The IANA zone the CLI reported alongside it, if any.</param>
+    /// <param name="utcNow">The current time, which supplies the missing year.</param>
+    /// <returns>The reset time in UTC, or null if it can't be determined.</returns>
+    internal DateTimeOffset? TryParseResetsAtUtc(string resets, string? timezone, DateTime utcNow)
     {
-        if (!DateTime.TryParseExact(resets, resetsAtFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime parsed))
-        {
-            return null;
-        }
-
         if (timezone is null)
         {
             return null;
@@ -122,8 +129,13 @@ public sealed partial class ClaudeUsageService(ILogger<ClaudeUsageService> logge
         try
         {
             TimeZoneInfo zone = TimeZoneInfo.FindSystemTimeZoneById(timezone);
-            DateTime utc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(parsed, DateTimeKind.Unspecified), zone);
-            return new DateTimeOffset(utc, TimeSpan.Zero);
+            DateTime? utc = TryParseInYear(resets, utcNow.Year, zone);
+            if (utc < utcNow.AddDays(-1))
+            {
+                utc = TryParseInYear(resets, utcNow.Year + 1, zone) ?? utc;
+            }
+
+            return utc is { } resolved ? new DateTimeOffset(resolved, TimeSpan.Zero) : null;
         }
         catch (TimeZoneNotFoundException)
         {
@@ -134,4 +146,9 @@ public sealed partial class ClaudeUsageService(ILogger<ClaudeUsageService> logge
             return null;
         }
     }
+
+    private DateTime? TryParseInYear(string resets, int year, TimeZoneInfo zone) =>
+        DateTime.TryParseExact($"{resets} {year}", resetsAtFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime parsed)
+            ? TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(parsed, DateTimeKind.Unspecified), zone)
+            : null;
 }

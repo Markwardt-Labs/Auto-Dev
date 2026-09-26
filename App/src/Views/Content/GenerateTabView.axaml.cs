@@ -18,7 +18,7 @@ using Avalonia.Media.Imaging;
 
 namespace AutoDev.Views.Content;
 
-public partial class GenerateTabView : UserControl
+public sealed partial class GenerateTabView : UserControl
 {
     private ScrollViewer? scroller;
     private TextBox? inputBox;

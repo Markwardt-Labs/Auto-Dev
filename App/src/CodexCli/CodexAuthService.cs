@@ -107,6 +107,6 @@ public sealed class CodexAuthService(ILogger<CodexAuthService> logger) : IAiAuth
         "pro" => "Pro",
         "team" => "Team",
         "enterprise" => "Enterprise",
-        var other => char.ToUpperInvariant(other[0]) + other[1..],
+        string other => char.ToUpperInvariant(other[0]) + other[1..],
     };
 }

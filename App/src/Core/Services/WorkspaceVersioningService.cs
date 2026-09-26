@@ -6,6 +6,8 @@ public sealed class WorkspaceVersioningService(string workspacePath, IGitService
 {
     private static readonly string localExcludePattern = ".autodev/local/";
 
+    private string TemplateOfferedMarkerPath => Path.Combine(workspacePath, ".autodev", "local", "template-offered");
+
     public async Task<bool> IsRepoInitializedAsync(CancellationToken cancellationToken = default)
     {
         if (!await git.IsRepoAsync(workspacePath, cancellationToken))
@@ -17,6 +19,18 @@ public sealed class WorkspaceVersioningService(string workspacePath, IGitService
         // returns true for it) but has no commits yet - HEAD is an "unborn" branch. Treating that the same as
         // "no repo yet" routes it through InitializeRepoAsync below just like a brand new plain folder.
         return await git.HasCommitsAsync(workspacePath, cancellationToken);
+    }
+
+    public async Task<bool> ShouldOfferTemplateAsync(CancellationToken cancellationToken = default) =>
+        !File.Exists(TemplateOfferedMarkerPath)
+        && await git.HasCommitsAsync(workspacePath, cancellationToken)
+        && !await git.HasTrackedFilesAsync(workspacePath, cancellationToken)
+        && (await git.GetWorkingTreeChangesAsync(workspacePath, cancellationToken)).Count == 0;
+
+    public async Task MarkTemplateOfferedAsync(CancellationToken cancellationToken = default)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(TemplateOfferedMarkerPath)!);
+        await File.WriteAllTextAsync(TemplateOfferedMarkerPath, "", cancellationToken);
     }
 
     public async Task<bool> HasUserIdentityConfiguredAsync(CancellationToken cancellationToken = default) =>
@@ -102,6 +116,20 @@ public sealed class WorkspaceVersioningService(string workspacePath, IGitService
         bool currentHadRemoteTrackingBranch = current is not null
             && await git.GetRemoteTrackingCommitAsync(workspacePath, current, cancellationToken) is not null;
 
+        // Which non-current local branches had nothing unpushed before this fetch - also captured up front,
+        // since the fetch below moves the remote-tracking refs this compares against.
+        HashSet<string> inSyncBeforeFetch = [];
+        foreach (string branch in await git.ListBranchesAsync(workspacePath, "", cancellationToken))
+        {
+            if (branch != current
+                && await git.BranchExistsAsync(workspacePath, branch, cancellationToken)
+                && await git.GetRemoteTrackingCommitAsync(workspacePath, branch, cancellationToken) is { } priorRemoteTip
+                && priorRemoteTip == await git.RevParseAsync(workspacePath, branch, cancellationToken))
+            {
+                inSyncBeforeFetch.Add(branch);
+            }
+        }
+
         if (!await git.FetchAsync(workspacePath, prune: true, cancellationToken))
         {
             return; // no remote, or unreachable - nothing to sync
@@ -123,7 +151,15 @@ public sealed class WorkspaceVersioningService(string workspacePath, IGitService
             }
 
             string localTip = await git.RevParseAsync(workspacePath, branch, cancellationToken);
-            if (remoteTip != localTip)
+            if (remoteTip == localTip)
+            {
+                continue;
+            }
+
+            // Mirroring the remote (including a history rewrite pushed from elsewhere) is only safe when the
+            // local branch had nothing of its own - e.g. a commit whose push failed while offline, before the
+            // user switched away. Resetting that branch would silently orphan those commits.
+            if (inSyncBeforeFetch.Contains(branch) || await git.IsAncestorAsync(workspacePath, localTip, remoteTip, cancellationToken))
             {
                 await git.ForceUpdateBranchRefAsync(workspacePath, branch, remoteTip, cancellationToken);
             }
@@ -149,7 +185,8 @@ public sealed class WorkspaceVersioningService(string workspacePath, IGitService
     {
         string? branch = await git.GetCurrentBranchAsync(workspacePath, cancellationToken);
         string hash = await git.RevParseAsync(workspacePath, "HEAD", cancellationToken);
-        return new GitActionSnapshot(branch, hash);
+        bool hadPendingChanges = await git.HasUncommittedChangesAsync(workspacePath, cancellationToken);
+        return new GitActionSnapshot(branch, hash, hadPendingChanges);
     }
 
     public async Task RevertToSnapshotAsync(GitActionSnapshot snapshot, CancellationToken cancellationToken = default)
@@ -165,12 +202,27 @@ public sealed class WorkspaceVersioningService(string workspacePath, IGitService
             string? currentBranch = await git.GetCurrentBranchAsync(workspacePath, cancellationToken);
             if (currentBranch != snapshot.Branch)
             {
-                await git.DiscardChangesAsync(workspacePath, cancellationToken);
+                // A plain checkout carries pending changes across - only safe to discard first when there
+                // were none of the user's own to lose.
+                if (!snapshot.HadPendingChanges)
+                {
+                    await git.DiscardChangesAsync(workspacePath, cancellationToken);
+                }
+
                 await git.CheckoutAsync(workspacePath, snapshot.Branch, cancellationToken);
             }
         }
 
-        await git.ResetHardAsync(workspacePath, snapshot.CommitHash, cancellationToken);
+        // Cancel (or an unexpected error) must only undo what the action did, never the work that was already
+        // pending when it started - a hard reset + clean would permanently delete untracked files too.
+        if (snapshot.HadPendingChanges)
+        {
+            await git.ResetMixedAsync(workspacePath, snapshot.CommitHash, cancellationToken);
+        }
+        else
+        {
+            await git.ResetHardAsync(workspacePath, snapshot.CommitHash, cancellationToken);
+        }
     }
 
     public async Task<BranchCreationOutcome> CreateBranchAsync(string name, string fromRef, CancellationToken cancellationToken = default)
@@ -180,7 +232,11 @@ public sealed class WorkspaceVersioningService(string workspacePath, IGitService
             return BranchCreationOutcome.IdAlreadyExists;
         }
 
-        await git.CreateBranchAsync(workspacePath, name, fromRef, cancellationToken);
+        if (!await git.CreateBranchAsync(workspacePath, name, fromRef, cancellationToken))
+        {
+            return BranchCreationOutcome.InvalidName;
+        }
+
         await git.CheckoutAsync(workspacePath, name, cancellationToken);
         await git.PushAsync(workspacePath, name, force: false, setUpstream: true, cancellationToken: cancellationToken);
         return BranchCreationOutcome.Created;
@@ -193,7 +249,11 @@ public sealed class WorkspaceVersioningService(string workspacePath, IGitService
             return TagCreationOutcome.IdAlreadyExists;
         }
 
-        await git.CreateAnnotatedTagAsync(workspacePath, name, atRef, cancellationToken);
+        if (!await git.CreateAnnotatedTagAsync(workspacePath, name, atRef, cancellationToken))
+        {
+            return TagCreationOutcome.InvalidName;
+        }
+
         await git.PushAsync(workspacePath, name, force: false, setUpstream: false, cancellationToken: cancellationToken);
         return TagCreationOutcome.Created;
     }
@@ -357,15 +417,23 @@ public sealed class WorkspaceVersioningService(string workspacePath, IGitService
         return commits.Count > 0 ? commits[0].Subject : "";
     }
 
-    public async Task<bool> SquashAsync(string baseBranch, string message, CancellationToken cancellationToken = default)
+    public async Task<SquashOutcome> SquashAsync(string baseBranch, string message, CancellationToken cancellationToken = default)
     {
-        await SquashSinceBaseAsync(baseBranch, message, cancellationToken);
-        return await PushCurrentBranchAsync(force: true, cancellationToken);
+        if (!await SquashSinceBaseAsync(baseBranch, message, cancellationToken))
+        {
+            return SquashOutcome.SquashFailed;
+        }
+
+        return await PushCurrentBranchAsync(force: true, cancellationToken) ? SquashOutcome.Succeeded : SquashOutcome.PushFailed;
     }
 
     public async Task<GitOperationOutcome> RebaseWithSquashAsync(string ontoBranch, string squashMessage, CancellationToken cancellationToken = default)
     {
-        await SquashSinceBaseAsync(ontoBranch, squashMessage, cancellationToken);
+        if (!await SquashSinceBaseAsync(ontoBranch, squashMessage, cancellationToken))
+        {
+            return GitOperationOutcome.Failed;
+        }
+
         return await git.RebaseOntoAsync(workspacePath, ontoBranch, cancellationToken);
     }
 
@@ -412,14 +480,22 @@ public sealed class WorkspaceVersioningService(string workspacePath, IGitService
         if (squashMessage is not null)
         {
             IReadOnlyList<GitCommit> commitsSinceBase = await git.GetCommitsSinceAsync(workspacePath, mergeBase, "HEAD", cancellationToken);
-            if (commitsSinceBase.Count > 1)
+            if (commitsSinceBase.Count > 1 && !await git.SquashSinceAsync(workspacePath, mergeBase, squashMessage, cancellationToken))
             {
-                await git.SquashSinceAsync(workspacePath, mergeBase, squashMessage, cancellationToken);
+                return false;
             }
         }
 
         string currentTip = await git.RevParseAsync(workspacePath, "HEAD", cancellationToken);
         await git.CheckoutAsync(workspacePath, targetBranch, cancellationToken);
+
+        // A checkout blocked by pending changes leaves current checked out - "fast-forwarding" it to its own tip
+        // would then report success, and the caller would go on to delete current (including on the remote).
+        if (await git.GetCurrentBranchAsync(workspacePath, cancellationToken) != targetBranch)
+        {
+            return false;
+        }
+
         bool fastForwarded = await git.FastForwardMergeAsync(workspacePath, currentTip, cancellationToken);
         if (fastForwarded)
         {
@@ -437,10 +513,10 @@ public sealed class WorkspaceVersioningService(string workspacePath, IGitService
         return fastForwarded;
     }
 
-    private async Task SquashSinceBaseAsync(string baseBranch, string message, CancellationToken cancellationToken)
+    private async Task<bool> SquashSinceBaseAsync(string baseBranch, string message, CancellationToken cancellationToken)
     {
         string mergeBase = await git.MergeBaseAsync(workspacePath, baseBranch, "HEAD", cancellationToken);
-        await git.SquashSinceAsync(workspacePath, mergeBase, message, cancellationToken);
+        return mergeBase.Length > 0 && await git.SquashSinceAsync(workspacePath, mergeBase, message, cancellationToken);
     }
 
     public async Task<IReadOnlyList<BranchSummary>> ListAllBranchesAsync(CancellationToken cancellationToken = default)

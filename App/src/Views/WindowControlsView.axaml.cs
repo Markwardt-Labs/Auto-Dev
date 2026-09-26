@@ -4,7 +4,7 @@ using Avalonia.Interactivity;
 
 namespace AutoDev.Views;
 
-public partial class WindowControlsView : UserControl
+public sealed partial class WindowControlsView : UserControl
 {
     private Button? maximizeButton;
     private Button? restoreButton;

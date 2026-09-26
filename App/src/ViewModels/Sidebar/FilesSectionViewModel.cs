@@ -546,8 +546,7 @@ public sealed partial class FilesSectionViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        fileTreeService.CreateFile(rootPath, name);
-        Refresh();
+        await RunFileOperationAsync("New File", () => fileTreeService.CreateFile(rootPath, name));
     }
 
     [RelayCommand(CanExecute = nameof(CanMutate))]
@@ -559,8 +558,7 @@ public sealed partial class FilesSectionViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        fileTreeService.CreateFolder(rootPath, name);
-        Refresh();
+        await RunFileOperationAsync("New Folder", () => fileTreeService.CreateFolder(rootPath, name));
     }
 
     [RelayCommand(CanExecute = nameof(CanMutateInFolder))]
@@ -572,8 +570,7 @@ public sealed partial class FilesSectionViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        fileTreeService.CreateFile(node.FullPath, name);
-        Refresh();
+        await RunFileOperationAsync("New File", () => fileTreeService.CreateFile(node.FullPath, name));
     }
 
     [RelayCommand(CanExecute = nameof(CanMutateInFolder))]
@@ -585,8 +582,7 @@ public sealed partial class FilesSectionViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        fileTreeService.CreateFolder(node.FullPath, name);
-        Refresh();
+        await RunFileOperationAsync("New Folder", () => fileTreeService.CreateFolder(node.FullPath, name));
     }
 
     [RelayCommand(CanExecute = nameof(CanMutateNode))]
@@ -598,16 +594,19 @@ public sealed partial class FilesSectionViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        fileTreeService.Rename(node.FullPath, newName);
-        Refresh();
+        // A separator (or "..") would move the item somewhere else entirely - possibly outside the workspace.
+        if (newName.IndexOfAny(['/', '\\']) >= 0 || newName is "." or "..")
+        {
+            await dialogService.ShowMessageDialogAsync("Rename", "A name can't contain a path separator - use drag and drop to move an item.");
+            return;
+        }
+
+        await RunFileOperationAsync("Rename", () => fileTreeService.Rename(node.FullPath, newName));
     }
 
     [RelayCommand(CanExecute = nameof(CanMutateNode))]
-    private void Duplicate(FileTreeNodeViewModel node)
-    {
-        fileTreeService.Duplicate(node.FullPath, node.IsDirectory);
-        Refresh();
-    }
+    private async Task DuplicateAsync(FileTreeNodeViewModel node) =>
+        await RunFileOperationAsync("Duplicate", () => fileTreeService.Duplicate(node.FullPath, node.IsDirectory));
 
     /// <summary>The FILES heading's own "Open" always targets the workspace root - the per-node context menu (OpenFolder below) is the way to open a specific folder instead. Non-mutating (just launches the OS file manager), so unlike New File/Folder it's never gated on CanMutate.</summary>
     [RelayCommand]
@@ -656,7 +655,21 @@ public sealed partial class FilesSectionViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        fileTreeService.Delete(node.FullPath, node.IsDirectory);
+        await RunFileOperationAsync("Delete", () => fileTreeService.Delete(node.FullPath, node.IsDirectory));
+    }
+
+    /// <summary>Runs a tree mutation, then refreshes - a filesystem failure (the name is already taken, no permission, an invalid name, ...) is shown as a message rather than escaping the async command, which would take down the whole app.</summary>
+    private async Task RunFileOperationAsync(string title, Action operation)
+    {
+        try
+        {
+            operation();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            await dialogService.ShowMessageDialogAsync(title, ex.Message);
+        }
+
         Refresh();
     }
 

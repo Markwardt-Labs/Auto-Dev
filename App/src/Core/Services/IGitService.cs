@@ -57,6 +57,9 @@ public interface IGitService
     /// <summary>Whether HEAD currently resolves to a real commit - false for a freshly `git init`'d repo, or one cloned from an empty remote, whose branch still exists only as an "unborn" ref name with nothing committed to it yet. Checks the exit code of `git rev-parse --verify --quiet HEAD` rather than RevParseAsync's output, since plain `rev-parse HEAD` prints the literal text "HEAD" back to stdout (not empty) when it can't resolve it.</summary>
     Task<bool> HasCommitsAsync(string workspacePath, CancellationToken cancellationToken = default);
 
+    /// <summary>Whether HEAD's tree contains any file at all (`git ls-tree -r --name-only HEAD`) - false for a repo whose only commit(s) are empty, like the "Initial commit" AutoDev itself makes. Requires HasCommitsAsync.</summary>
+    Task<bool> HasTrackedFilesAsync(string workspacePath, CancellationToken cancellationToken = default);
+
     Task InitAsync(string workspacePath, CancellationToken cancellationToken = default);
 
     /// <summary>Clones `url` into a new `destinationName` subfolder of `parentDirectory` (there's no existing workspace to run "in" yet, unlike every other method here). ErrorMessage is git's own stderr on failure (bad URL, auth/permissions, network - see RunAsync's GIT_TERMINAL_PROMPT/GIT_SSH_COMMAND overrides, which guarantee a genuinely missing-credentials failure comes back quickly with a real message instead of hanging on a terminal prompt that will never come, while still letting the user's own configured credential helper answer non-interactively exactly as it would outside AutoDev).</summary>
@@ -100,7 +103,8 @@ public interface IGitService
     /// <summary>Creates a local branch tracking `origin/{branchName}` if no local branch of that name exists yet - lets code that discovered a branch only via ListBranchesAsync's remote-tracking half operate on it (log, checkout, etc.) exactly like any other local branch. No-op if the local branch already exists.</summary>
     Task EnsureLocalBranchAsync(string workspacePath, string branchName, CancellationToken cancellationToken = default);
 
-    Task CreateBranchAsync(string workspacePath, string branchName, string fromRef, CancellationToken cancellationToken = default);
+    /// <summary>Creates `branchName` at `fromRef` - false if git rejected it (an invalid name such as one containing a space, or one starting with "-", which is passed after "--" so it can never be read as an option).</summary>
+    Task<bool> CreateBranchAsync(string workspacePath, string branchName, string fromRef, CancellationToken cancellationToken = default);
 
     Task DeleteBranchAsync(string workspacePath, string branchName, CancellationToken cancellationToken = default);
 
@@ -142,6 +146,7 @@ public interface IGitService
 
     Task<string?> GetRemoteUrlAsync(string workspacePath, CancellationToken cancellationToken = default);
 
+    /// <summary>The commit hash `refName` resolves to, or an empty string if it doesn't resolve (e.g. `{rootCommit}^`).</summary>
     Task<string> RevParseAsync(string workspacePath, string refName, CancellationToken cancellationToken = default);
 
     /// <summary>`refName`'s own one-line commit subject (`%s`) - used for the Version section's plain commit-message display.</summary>
@@ -155,8 +160,8 @@ public interface IGitService
     /// <summary>Every tag in the repo, grouped by the commit it ultimately points at (an annotated tag is dereferenced to the commit it tags, not left as its own tag object) - used to show tag badges on the History tab's timeline without one subprocess call per commit.</summary>
     Task<IReadOnlyDictionary<string, IReadOnlyList<GitTag>>> GetTagsByCommitAsync(string workspacePath, CancellationToken cancellationToken = default);
 
-    /// <summary>Creates an annotated tag (`git tag -a`, always - never a plain lightweight one) named `name` at `atRef`, with a deliberately blank annotation message.</summary>
-    Task CreateAnnotatedTagAsync(string workspacePath, string name, string atRef, CancellationToken cancellationToken = default);
+    /// <summary>Creates an annotated tag (`git tag -a`, always - never a plain lightweight one) named `name` at `atRef`, with a deliberately blank annotation message - false if git rejected it (see CreateBranchAsync).</summary>
+    Task<bool> CreateAnnotatedTagAsync(string workspacePath, string name, string atRef, CancellationToken cancellationToken = default);
 
     /// <summary>Every file `commitHash` changed relative to its first parent (`--root` makes this also work for a parentless root commit, diffing against the empty tree) - populates the History tab's per-commit expanded changes tree.</summary>
     Task<IReadOnlyList<GitChange>> GetCommitChangesAsync(string workspacePath, string commitHash, CancellationToken cancellationToken = default);
@@ -178,6 +183,9 @@ public interface IGitService
 
     /// <summary>Hard-resets the currently checked-out branch to `commitHash` (`git reset --hard` + `clean -fd`, unlike DiscardChangesAsync which always resets to HEAD) - used to revert a cancelled busy action back to its pre-action state (see WorkspaceVersioningService.RevertToSnapshotAsync).</summary>
     Task ResetHardAsync(string workspacePath, string commitHash, CancellationToken cancellationToken = default);
+
+    /// <summary>Moves the currently checked-out branch to `commitHash` (`git reset --mixed`) while leaving every working-tree file exactly as it is - used instead of ResetHardAsync to revert a cancelled busy action that started with pending changes, so those are never discarded.</summary>
+    Task ResetMixedAsync(string workspacePath, string commitHash, CancellationToken cancellationToken = default);
 
     /// <summary>Adds an "origin" remote, or repoints it if one already exists.</summary>
     Task SetRemoteAsync(string workspacePath, string url, CancellationToken cancellationToken = default);
@@ -203,8 +211,8 @@ public interface IGitService
     /// <summary>`git merge-base refA refB` - the commit both refs' histories share.</summary>
     Task<string> MergeBaseAsync(string workspacePath, string refA, string refB, CancellationToken cancellationToken = default);
 
-    /// <summary>Collapses every commit since `sinceRef` (exclusive) into one new commit at HEAD with `message` - `git reset --soft sinceRef` followed by `git commit`, which preserves HEAD's current tree/index exactly and only changes how many commits it took to get there.</summary>
-    Task SquashSinceAsync(string workspacePath, string sinceRef, string message, CancellationToken cancellationToken = default);
+    /// <summary>Collapses every commit since `sinceRef` (exclusive) into one new commit at HEAD with `message` - `git reset --soft sinceRef` followed by `git commit`, which preserves HEAD's current tree/index exactly and only changes how many commits it took to get there. False (with the branch restored to where it was) if the commit fails.</summary>
+    Task<bool> SquashSinceAsync(string workspacePath, string sinceRef, string message, CancellationToken cancellationToken = default);
 
     /// <summary>`git stash push -u` (`-u` also grabs untracked files, not just tracked modifications) - false if the stash itself failed (rare; e.g. an in-progress merge/rebase git refuses to stash over). Callers only ever call this once they've already confirmed there's something pending to stash (see WorkspaceVersioningService.PullCurrentBranchWithStashAsync) - unlike a plain `git stash push` with nothing to stash, which exits 0 having done nothing, this is never called in a state where that ambiguity would matter.</summary>
     Task<bool> StashPushAsync(string workspacePath, CancellationToken cancellationToken = default);

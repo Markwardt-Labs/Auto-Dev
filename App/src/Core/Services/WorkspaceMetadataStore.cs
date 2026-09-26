@@ -14,6 +14,11 @@ public sealed class WorkspaceMetadataStore : IWorkspaceMetadataStore
     private static readonly string scriptRunsDirName = "script-runs";
     private static readonly string taskRunsDirName = "task-runs";
 
+    private readonly AtomicJsonFile atomicJsonFile = new();
+
+    /// <summary>Serializes every load-modify-save of the shared per-workspace dictionary files (sessions, drafts, requests) - several of those saves are fired without awaiting (see GenerateTabViewModel), and two interleaving would otherwise silently drop one of their updates.</summary>
+    private readonly SemaphoreSlim dictionaryFileLock = new(1, 1);
+
     public void EnsureInitialized(string workspacePath)
     {
         Directory.CreateDirectory(MetadataDir(workspacePath));
@@ -24,9 +29,7 @@ public sealed class WorkspaceMetadataStore : IWorkspaceMetadataStore
     {
         string dir = Path.Combine(LocalDir(workspacePath), scriptRunsDirName, SanitizeScriptFolder(record.FilePath));
         Directory.CreateDirectory(dir);
-        string path = Path.Combine(dir, $"{record.Id}.json");
-        await using FileStream stream = File.Create(path);
-        await JsonSerializer.SerializeAsync(stream, record, AppJson.Options, cancellationToken);
+        await atomicJsonFile.WriteAsync(Path.Combine(dir, $"{record.Id}.json"), record, cancellationToken);
     }
 
     public async Task<List<ScriptRunRecord>> LoadScriptRunsAsync(string workspacePath, string scriptPath, CancellationToken cancellationToken = default)
@@ -75,9 +78,7 @@ public sealed class WorkspaceMetadataStore : IWorkspaceMetadataStore
     {
         string dir = Path.Combine(LocalDir(workspacePath), taskRunsDirName, SanitizeScriptFolder(record.FilePath));
         Directory.CreateDirectory(dir);
-        string path = Path.Combine(dir, $"{record.Id}.json");
-        await using FileStream stream = File.Create(path);
-        await JsonSerializer.SerializeAsync(stream, record, AppJson.Options, cancellationToken);
+        await atomicJsonFile.WriteAsync(Path.Combine(dir, $"{record.Id}.json"), record, cancellationToken);
     }
 
     public async Task<List<TaskRunRecord>> LoadTaskRunsAsync(string workspacePath, string taskPath, CancellationToken cancellationToken = default)
@@ -137,9 +138,9 @@ public sealed class WorkspaceMetadataStore : IWorkspaceMetadataStore
                     records.Add(record);
                 }
             }
-            catch (JsonException)
+            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
             {
-                // skip corrupt run file
+                // skip a corrupt or unreadable run file
             }
         }
 
@@ -162,9 +163,17 @@ public sealed class WorkspaceMetadataStore : IWorkspaceMetadataStore
     public async Task SaveGenerateSessionIdAsync(string workspacePath, string sessionKey, string sessionId, CancellationToken cancellationToken = default)
     {
         EnsureInitialized(workspacePath);
-        Dictionary<string, string> sessions = await LoadStringDictAsync(GenerateSessionsFile(workspacePath), cancellationToken);
-        sessions[sessionKey] = sessionId;
-        await SaveStringDictAsync(GenerateSessionsFile(workspacePath), sessions, cancellationToken);
+        await dictionaryFileLock.WaitAsync(cancellationToken);
+        try
+        {
+            Dictionary<string, string> sessions = await LoadStringDictAsync(GenerateSessionsFile(workspacePath), cancellationToken);
+            sessions[sessionKey] = sessionId;
+            await atomicJsonFile.WriteAsync(GenerateSessionsFile(workspacePath), sessions, cancellationToken);
+        }
+        finally
+        {
+            dictionaryFileLock.Release();
+        }
     }
 
     public async Task<string?> LoadGenerateDraftAsync(string workspacePath, string sessionKey, CancellationToken cancellationToken = default)
@@ -175,15 +184,23 @@ public sealed class WorkspaceMetadataStore : IWorkspaceMetadataStore
 
     public async Task SaveGenerateDraftAsync(string workspacePath, string sessionKey, string draftText, CancellationToken cancellationToken = default)
     {
-        Dictionary<string, string> drafts = await LoadStringDictAsync(GenerateDraftsFile(workspacePath), cancellationToken);
-        bool changed = string.IsNullOrEmpty(draftText) ? drafts.Remove(sessionKey) : UpdateAndReportChanged(drafts, sessionKey, draftText);
-        if (!changed)
+        await dictionaryFileLock.WaitAsync(cancellationToken);
+        try
         {
-            return;
-        }
+            Dictionary<string, string> drafts = await LoadStringDictAsync(GenerateDraftsFile(workspacePath), cancellationToken);
+            bool changed = string.IsNullOrEmpty(draftText) ? drafts.Remove(sessionKey) : UpdateAndReportChanged(drafts, sessionKey, draftText);
+            if (!changed)
+            {
+                return;
+            }
 
-        EnsureInitialized(workspacePath);
-        await SaveStringDictAsync(GenerateDraftsFile(workspacePath), drafts, cancellationToken);
+            EnsureInitialized(workspacePath);
+            await atomicJsonFile.WriteAsync(GenerateDraftsFile(workspacePath), drafts, cancellationToken);
+        }
+        finally
+        {
+            dictionaryFileLock.Release();
+        }
     }
 
     public async Task<List<GenerateRequest>> LoadGenerateRequestsAsync(string workspacePath, string sessionKey, CancellationToken cancellationToken = default)
@@ -195,10 +212,17 @@ public sealed class WorkspaceMetadataStore : IWorkspaceMetadataStore
     public async Task SaveGenerateRequestsAsync(string workspacePath, string sessionKey, List<GenerateRequest> requests, CancellationToken cancellationToken = default)
     {
         EnsureInitialized(workspacePath);
-        Dictionary<string, List<GenerateRequest>> all = await LoadGenerateRequestsDictAsync(workspacePath, cancellationToken);
-        all[sessionKey] = requests;
-        await using FileStream stream = File.Create(GenerateRequestsFile(workspacePath));
-        await JsonSerializer.SerializeAsync(stream, all, AppJson.Options, cancellationToken);
+        await dictionaryFileLock.WaitAsync(cancellationToken);
+        try
+        {
+            Dictionary<string, List<GenerateRequest>> all = await LoadGenerateRequestsDictAsync(workspacePath, cancellationToken);
+            all[sessionKey] = requests;
+            await atomicJsonFile.WriteAsync(GenerateRequestsFile(workspacePath), all, cancellationToken);
+        }
+        finally
+        {
+            dictionaryFileLock.Release();
+        }
     }
 
     private static async Task<Dictionary<string, List<GenerateRequest>>> LoadGenerateRequestsDictAsync(string workspacePath, CancellationToken cancellationToken)
@@ -247,12 +271,6 @@ public sealed class WorkspaceMetadataStore : IWorkspaceMetadataStore
         {
             return [];
         }
-    }
-
-    private static async Task SaveStringDictAsync(string path, Dictionary<string, string> dict, CancellationToken cancellationToken)
-    {
-        await using FileStream stream = File.Create(path);
-        await JsonSerializer.SerializeAsync(stream, dict, AppJson.Options, cancellationToken);
     }
 
     private static string MetadataDir(string workspacePath) => Path.Combine(workspacePath, metadataDirName);

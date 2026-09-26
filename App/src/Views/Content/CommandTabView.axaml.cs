@@ -7,7 +7,7 @@ using AutoDev.ViewModels.Content;
 
 namespace AutoDev.Views.Content;
 
-public partial class CommandTabView : UserControl
+public sealed partial class CommandTabView : UserControl
 {
     private readonly ScrollViewer? scroller;
     private readonly TextBox? inputBox;

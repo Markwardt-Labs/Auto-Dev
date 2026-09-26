@@ -4,7 +4,7 @@ using AutoDev.ViewModels.Dialogs;
 
 namespace AutoDev.Views.Dialogs;
 
-public partial class MessageDialogWindow : Window
+public sealed partial class MessageDialogWindow : Window
 {
     public MessageDialogWindow()
     {

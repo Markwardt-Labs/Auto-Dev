@@ -176,6 +176,9 @@
         <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtleBrush}" />
         <Setter Property="CornerRadius" Value="3" />
+        <!-- The Inter font's contextual alternates (calt) draw typed "->" / "=>" (and similar) as single arrow
+             glyphs - the text itself is unchanged, but what's shown in an input must match what was typed. -->
+        <Setter Property="FontFeatures" Value="-calt" />
     </Style>
 
     <Style Selector="ListBox">

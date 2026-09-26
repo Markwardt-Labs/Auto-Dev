@@ -93,7 +93,7 @@ public sealed partial class GenerateRequestViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(HasOutput));
 
-        var generation = ++renderGeneration;
+        int generation = ++renderGeneration;
         RenderedOutput = value is null ? value : MarkdownLineBreakProcessor.Process(value);
 
         if (value is null || !value.Contains("```mermaid", StringComparison.Ordinal))

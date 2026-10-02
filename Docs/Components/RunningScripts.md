@@ -39,6 +39,42 @@ looks exactly like the script hanging, followed by garbled output once it doesn'
 appends exactly what it's given with no line-boundary assumption of its own, so a prompt like that
 appears the instant the process actually writes it.
 
+The text itself is always appended to `OutputText` immediately, but the `PropertyChanged` notification
+for it is throttled to at most once per 100ms (`LiveScriptRun.notifyInterval`) - stdout and stderr each
+pump independently and can together produce chunks far faster than that. Notifying on every single one
+would force the Script tab's bound `SelectableTextBlock` (no incremental reflow - replacing `Text`
+re-lays out the *entire* accumulated document) to fully re-layout on every chunk, which gets slower the
+longer a run has already been printing; throttling bounds the number of relayouts to roughly the run's
+own duration divided by the interval instead. A trailing flush (a short `Task.Delay` scheduled the
+first time a chunk arrives inside an already-notified window) guarantees the last few chunks before a
+quiet spell still show up promptly rather than waiting on whatever output happens to arrive next;
+`MarkFinished` flushes immediately and unconditionally, since it only ever runs once every pump loop
+has already fully drained (CliWrap's `ExecuteAsync` doesn't return until both do), so nothing further
+will ever tick a pending flush after that point.
+
+Throttling alone doesn't bound the cost of any *individual* relayout, which still scales with the
+*entire* accumulated output - the actual problem for a long-running script - so
+`ScriptTabViewModel` also paginates `OutputText` into fixed 20,000-character chunks
+(`outputPageSize`), and the View binds the bounded `DisplayedPageText` instead of the raw
+`OutputText` directly. Character-based, not line-based, purely so computing a page is a plain
+`Substring` (cost proportional to the page size alone, not to how much output exists in total)
+rather than needing to scan/count lines across everything printed so far - a page can split a line
+in the middle, an accepted cosmetic tradeoff. The 20,000-character size itself was picked from
+measuring `SelectableTextBlock`'s own word-wrap layout, not guessed: ordinary multi-line output lays
+out fast even well past that (~100k characters, ~2000 lines, under a second), but Avalonia's
+line-breaking search degrades sharply on one long unbroken run with nothing to wrap on (a giant
+minified-JSON line, say) - tens of thousands of such characters alone took multiple seconds - so
+the page size is sized against that worst case, not the far more forgiving common one.
+
+While a run is live, the displayed page tracks the newest one as output grows (`followLatestPage`,
+mirroring the tab's own scroll-to-bottom auto-follow below) - reset true whenever a fresh run starts
+or the displayed script/task changes, and set false the instant the user pages back to review
+earlier output; paging forward to the newest page again resumes following it. A Prev/Next pager
+(`PreviousPageCommand`/`NextPageCommand`, `PageLabel`) appears only once there's actually more than
+one page (`HasMultiplePages`) - the common case (output that fits in one page) shows no pager at
+all. `CopyOutputAsync` still copies the complete `OutputText` regardless of which page is currently
+displayed.
+
 Stopping a run (`WorkspaceScriptRunnerService.StopRun`) cancels the linked `CancellationTokenSource`
 CliWrap's `ExecuteAsync` is running against, which forcefully kills the `dotnet` process (and, by
 extension, whatever it spawned) rather than just detaching from it - verified empirically, since
@@ -152,7 +188,9 @@ Two different, purpose-built consoles:
   populated straight from its persisted `ScriptRunRecord.Output` instead - either way the same
   `OutputText` property, so the Script tab's own XAML doesn't need to care which. It can either
   watch a run live or browse the most recent historical run for a script that isn't currently
-  running. A dedicated Copy icon button (`ScriptTabViewModel.CopyOutputCommand`) copies the whole of
+  running. `OutputText` itself is paginated for display (see `outputPageSize` above) - the bound
+  `SelectableTextBlock` shows `DisplayedPageText`, one bounded chunk at a time, not the raw
+  (potentially huge) `OutputText`. A dedicated Copy icon button (`ScriptTabViewModel.CopyOutputCommand`) copies the whole of
   `OutputText` to the clipboard unconditionally, rather than depending on the `SelectableTextBlock`
   displaying it: that control's own built-in select-all-then-copy can end up with Copy disabled
   after enough live text updates have gone by while it held a selection (a script's own output

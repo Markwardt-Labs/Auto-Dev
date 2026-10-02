@@ -12,8 +12,7 @@ namespace AutoDev.ViewModels.Sidebar;
 /// <summary>
 /// A passive display of the current git target (branch/tag/commit) and pending-changes state, plus every action
 /// that targets the currently checked-out branch directly rather than some other row in the History tab
-/// (Commit/Reset/Branch/Tag/Remote/Squash/Rebase/Merge - offered via a click on this section itself, see
-/// VersionSectionView) and the shared busy/lock machinery every other mutating git action (triggered from the
+/// (Commit/Reset/Branch/Tag/Remote - offered via a click on this section itself, see VersionSectionView) and the shared busy/lock machinery every other mutating git action (triggered from the
 /// History tab's own right-click menus - see HistoryTabViewModel) runs through.
 /// </summary>
 public sealed partial class VersionSectionViewModel : ViewModelBase, IDisposable
@@ -115,9 +114,6 @@ public sealed partial class VersionSectionViewModel : ViewModelBase, IDisposable
         BranchCommand.NotifyCanExecuteChanged();
         TagCommand.NotifyCanExecuteChanged();
         RemoteCommand.NotifyCanExecuteChanged();
-        SquashCommand.NotifyCanExecuteChanged();
-        RebaseCommand.NotifyCanExecuteChanged();
-        MergeCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnIsBusyChanged(bool value)
@@ -381,15 +377,15 @@ public sealed partial class VersionSectionViewModel : ViewModelBase, IDisposable
     private void ConfirmBusy() => busyConfirmTcs?.TrySetResult();
 
     /// <summary>
-    /// Shared conflict-resolution loop for this section's own Rebase/Merge, HistoryTabViewModel's Merge Into
-    /// Current/Rebase Current Onto This, and PullWithStashIfNeededAsync's own stash-pop conflicts - a no-op
+    /// Shared conflict-resolution loop for HistoryTabViewModel's Rebase/Merge actions (which rebase a branch
+    /// first when it isn't already built on the other) and PullWithStashIfNeededAsync's own stash-pop conflicts - a no-op
     /// unless the initial attempt already came back Conflicts. Locks the sidebar/Edit/History controls via
     /// IsAiWorking for the whole loop, exactly like a normal Generate turn, since Claude is actively editing
     /// files here just the same - only IsBusy (the busy overlay) drops out during the actual
     /// RunAutomatedTurnAsync call, so the user can watch the exchange happen in Generate (switched to
     /// automatically - see SwitchToGenerateRequested). Restores IsAiWorking to whatever it was before (rather
     /// than unconditionally clearing it) since this can run nested inside an already-locked flow.
-    /// continueAction is ContinueRebaseAsync/ContinueMergeAsync for those two callers; for a stash-pop conflict
+    /// continueAction is ContinueRebaseAsync for the History tab's callers; for a stash-pop conflict
     /// there's no git "continue" step (resolving and staging the files IS the fix), so that caller passes a
     /// lambda that just re-confirms success. buildInstruction defaults to the generic rebase/merge wording;
     /// PullWithStashIfNeededAsync passes its own, since "this produced merge conflicts" doesn't fit a stash
@@ -411,10 +407,9 @@ public sealed partial class VersionSectionViewModel : ViewModelBase, IDisposable
 
         bool wasAlreadyLocked = IsAiWorking;
 
-        // Restored (not just unconditionally set true) once the whole loop ends, below - this section's own
-        // Rebase/Merge and HistoryTabViewModel's Merge Into Current/Rebase Current Onto This always call this
-        // from inside RunBusyAsync, where IsBusy is already true; restoring it back to true afterward keeps
-        // the overlay up for whatever git work they still have left (ContinueMergeAsync/push), until
+        // Restored (not just unconditionally set true) once the whole loop ends, below - the History tab's
+        // Rebase/Merge actions always call this from inside RunBusyAsync, where IsBusy is already true; restoring it back to true afterward keeps
+        // the overlay up for whatever git work they still have left (continuing the rebase/pushing), until
         // RunBusyAsync's own tail finally drops it. PullWithStashIfNeededAsync calls this with no such
         // enclosing RunBusyAsync at all (IsBusy starts false) - restoring to false instead here is what
         // actually lets its overlay-free flow stay overlay-free once conflict resolution finishes, rather
@@ -679,111 +674,6 @@ public sealed partial class VersionSectionViewModel : ViewModelBase, IDisposable
         }
 
         await RunBusyAsync(ct => versioningService.ConfigureRemoteAsync(newUrl.Trim(), ct));
-    }
-
-    /// <summary>Squashes the current branch's own commits since diverging from a chosen base branch into one - only offered while targeting a branch, see VersionSectionView.</summary>
-    [RelayCommand(CanExecute = nameof(CanMutate))]
-    private async Task SquashAsync()
-    {
-        IReadOnlyList<string> branches = await versioningService.GetEligibleBaseBranchesAsync();
-        if (branches.Count == 0)
-        {
-            await dialogService.ShowMessageDialogAsync("Squash", "No other branch to squash against.");
-            return;
-        }
-
-        SquashDialogResult? result = await dialogService.ShowSquashDialogAsync(branches, branch => versioningService.GetDefaultSquashMessageAsync(branch));
-        if (result is null)
-        {
-            return;
-        }
-
-        await RunBusyAsync(async ct =>
-        {
-            SquashOutcome outcome = await versioningService.SquashAsync(result.BaseBranch, result.Message.Trim(), ct);
-            if (outcome == SquashOutcome.SquashFailed)
-            {
-                MarkFailed("Squash failed - the branch was left unchanged.");
-            }
-            else if (outcome == SquashOutcome.PushFailed)
-            {
-                MarkFailed("Squash succeeded locally, but pushing it to the remote failed.");
-            }
-        });
-    }
-
-    /// <summary>Rebases the current branch onto a chosen branch, always squashing its own commits first - only offered while targeting a branch, see VersionSectionView. Merge conflicts, if any, are handed to Claude via ResolveConflictsAsync.</summary>
-    [RelayCommand(CanExecute = nameof(CanMutate))]
-    private async Task RebaseAsync()
-    {
-        IReadOnlyList<string> branches = await versioningService.GetEligibleBaseBranchesAsync();
-        if (branches.Count == 0)
-        {
-            await dialogService.ShowMessageDialogAsync("Rebase", "No other branch to rebase onto.");
-            return;
-        }
-
-        RebaseDialogResult? result = await dialogService.ShowRebaseDialogAsync(branches, branch => versioningService.GetDefaultSquashMessageAsync(branch));
-        if (result is null)
-        {
-            return;
-        }
-
-        await RunBusyAsync(async ct =>
-        {
-            GitOperationOutcome outcome = await versioningService.RebaseWithSquashAsync(result.OntoBranch, result.SquashMessage.Trim(), ct);
-            outcome = await ResolveConflictsAsync(outcome, ct2 => versioningService.ContinueRebaseAsync(ct2), ct);
-            if (outcome == GitOperationOutcome.Succeeded)
-            {
-                if (!await versioningService.PushCurrentBranchAsync(force: true, ct))
-                {
-                    MarkFailed("Rebase succeeded locally, but pushing it to the remote failed.");
-                }
-            }
-            else if (outcome == GitOperationOutcome.Conflicts)
-            {
-                await versioningService.AbortRebaseAsync(ct);
-                MarkFailed("Could not automatically resolve the rebase conflicts - aborted.");
-            }
-            else
-            {
-                MarkFailed("Rebase failed.");
-            }
-        });
-    }
-
-    /// <summary>Fast-forward merges the current branch onto a chosen target branch, squashing first if there's more than one commit to bring over - only offered while targeting a branch, see VersionSectionView. Never conflicts (a fast-forward can't) - fails outright if the current branch isn't actually based on the target's own head. On success, the now-merged original branch is deleted both locally and on the remote (see IWorkspaceVersioningService.FastForwardMergeAsync, which leaves targetBranch - not the original branch - checked out afterward specifically so this can actually delete it).</summary>
-    [RelayCommand(CanExecute = nameof(CanMutate))]
-    private async Task MergeAsync()
-    {
-        IReadOnlyList<string> branches = await versioningService.GetEligibleMergeTargetBranchesAsync();
-        if (branches.Count == 0)
-        {
-            await dialogService.ShowMessageDialogAsync("Merge", "No branch this branch can be fast-forward merged onto.");
-            return;
-        }
-
-        MergeDialogResult? result = await dialogService.ShowMergeDialogAsync(branches, branch => versioningService.GetDefaultSquashMessageAsync(branch));
-        if (result is null)
-        {
-            return;
-        }
-
-        string? originalBranch = Target?.BranchName;
-        await RunBusyAsync(async ct =>
-        {
-            bool succeeded = await versioningService.FastForwardMergeAsync(result.TargetBranch, result.SquashMessage?.Trim(), ct);
-            if (!succeeded)
-            {
-                MarkFailed($"Couldn't fast-forward '{result.TargetBranch}' to '{originalBranch}' - it must be based on the head of '{result.TargetBranch}', and pending changes must not block switching to it.");
-                return;
-            }
-
-            if (originalBranch is not null && !await versioningService.DeleteBranchEverywhereAsync(originalBranch, ct))
-            {
-                MarkFailed($"Merged, but deleting '{originalBranch}' on the remote failed.");
-            }
-        });
     }
 
     public void Dispose()

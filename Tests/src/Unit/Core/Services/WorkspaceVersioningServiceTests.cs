@@ -98,18 +98,28 @@ public sealed class WorkspaceVersioningServiceTests
     }
 
     [Fact]
-    public async Task FastForwardMergeAsync_CheckoutOfTargetBlocked_FailsWithoutMergingOrPushing()
+    public async Task FastForwardAsync_CheckoutOfTargetBlocked_FailsWithoutMerging()
     {
         Mock<IGitService> git = new();
         git.Setup(g => g.GetCurrentBranchAsync("ws", It.IsAny<CancellationToken>())).ReturnsAsync("feature");
-        git.Setup(g => g.MergeBaseAsync("ws", "main", "HEAD", It.IsAny<CancellationToken>())).ReturnsAsync("base");
-        git.Setup(g => g.RevParseAsync("ws", "main", It.IsAny<CancellationToken>())).ReturnsAsync("base");
-        git.Setup(g => g.RevParseAsync("ws", "HEAD", It.IsAny<CancellationToken>())).ReturnsAsync("feature-tip");
+        git.Setup(g => g.IsAncestorAsync("ws", "main", "feature", It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
-        bool merged = await new WorkspaceVersioningService("ws", git.Object).FastForwardMergeAsync("main", squashMessage: null);
+        bool merged = await new WorkspaceVersioningService("ws", git.Object).FastForwardAsync("main", "feature");
 
         Assert.False(merged);
         git.Verify(g => g.FastForwardMergeAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-        git.Verify(g => g.PushAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RebaseAsync_CheckoutOfBranchBlocked_FailsWithoutRebasingTheWrongBranch()
+    {
+        Mock<IGitService> git = new();
+        git.Setup(g => g.GetCurrentBranchAsync("ws", It.IsAny<CancellationToken>())).ReturnsAsync("main");
+        git.Setup(g => g.IsAncestorAsync("ws", "main", "feature", It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        GitOperationOutcome outcome = await new WorkspaceVersioningService("ws", git.Object).RebaseAsync("feature", "main", squashMessage: null);
+
+        Assert.Equal(GitOperationOutcome.Failed, outcome);
+        git.Verify(g => g.RebaseOntoAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

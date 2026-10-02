@@ -24,7 +24,7 @@ public sealed partial class HistoryTabView : UserControl
         }
     }
 
-    /// <summary>The current branch's own row has nothing left to offer on its context menu - Checkout/Merge/Rebase/Delete only make sense for a different branch, and every current-branch-only action (Commit/Reset/Branch/Tag/Remote/Squash/Rebase) lives on the Version section instead. Suppresses the (otherwise empty) popup for that row rather than letting it open with nothing in it.</summary>
+    /// <summary>The current branch's own row has nothing left to offer on its context menu - Checkout/Squash/Rebase/Merge/Delete only make sense relative to a different branch, and every current-branch-only action (Commit/Reset/Branch/Tag/Remote) lives on the Version section instead. Suppresses the (otherwise empty) popup for that row rather than letting it open with nothing in it.</summary>
     private void OnBranchContextRequested(object? sender, ContextRequestedEventArgs e)
     {
         if (sender is StyledElement { DataContext: BranchRowViewModel { Branch.IsCurrent: true } })

@@ -345,18 +345,6 @@ public sealed class GitService : IGitService
     public async Task RebaseAbortAsync(string workspacePath, CancellationToken cancellationToken = default) =>
         await RunAsync(workspacePath, ["rebase", "--abort"], cancellationToken);
 
-    public async Task<GitOperationOutcome> MergeAsync(string workspacePath, string branchName, CancellationToken cancellationToken = default)
-    {
-        BufferedCommandResult result = await RunAsync(workspacePath, ["merge", branchName], cancellationToken);
-        return await ClassifyOperationResultAsync(workspacePath, result, cancellationToken);
-    }
-
-    public async Task<GitOperationOutcome> MergeContinueAsync(string workspacePath, CancellationToken cancellationToken = default)
-    {
-        BufferedCommandResult result = await RunAsync(workspacePath, ["merge", "--continue"], cancellationToken);
-        return await ClassifyOperationResultAsync(workspacePath, result, cancellationToken);
-    }
-
     public async Task MergeAbortAsync(string workspacePath, CancellationToken cancellationToken = default) =>
         await RunAsync(workspacePath, ["merge", "--abort"], cancellationToken);
 
@@ -455,23 +443,37 @@ public sealed class GitService : IGitService
         return result.StandardOutput.Trim();
     }
 
-    public async Task<bool> SquashSinceAsync(string workspacePath, string sinceRef, string message, CancellationToken cancellationToken = default)
+    public async Task<bool> SquashBranchAsync(string workspacePath, string branchName, string sinceRef, string message, CancellationToken cancellationToken = default)
     {
-        string originalHead = await RevParseAsync(workspacePath, "HEAD", cancellationToken);
-        if ((await RunAsync(workspacePath, ["reset", "--soft", sinceRef], cancellationToken)).ExitCode != 0)
+        string oldTip = await RevParseAsync(workspacePath, $"refs/heads/{branchName}", cancellationToken);
+        if (oldTip.Length == 0 || oldTip == await RevParseAsync(workspacePath, sinceRef, cancellationToken))
+        {
+            return false; // no such branch, or no commits since sinceRef to collapse
+        }
+
+        BufferedCommandResult commit = await RunAsync(workspacePath, ["commit-tree", $"{oldTip}^{{tree}}", "-p", sinceRef, "-m", message], cancellationToken);
+        if (commit.ExitCode != 0 || commit.StandardOutput.Trim() is not { Length: > 0 } newTip)
         {
             return false;
         }
 
-        if ((await RunAsync(workspacePath, ["commit", "-m", message], cancellationToken)).ExitCode == 0)
+        return (await RunAsync(workspacePath, ["update-ref", $"refs/heads/{branchName}", newTip, oldTip], cancellationToken)).ExitCode == 0;
+    }
+
+    public async Task<IReadOnlyDictionary<string, string>> GetLocalBranchTipsAsync(string workspacePath, CancellationToken cancellationToken = default)
+    {
+        BufferedCommandResult result = await RunAsync(workspacePath, ["for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads"], cancellationToken);
+        Dictionary<string, string> tips = [];
+        foreach (string line in SplitLines(result.StandardOutput))
         {
-            return true;
+            int separator = line.LastIndexOf(' ');
+            if (separator > 0)
+            {
+                tips[line[..separator]] = line[(separator + 1)..];
+            }
         }
 
-        // The soft reset already moved the branch - put it back so a failed commit (a hook, nothing to
-        // commit, ...) doesn't leave the squashed-away commits unreachable from the branch.
-        await RunAsync(workspacePath, ["reset", "--soft", originalHead], cancellationToken);
-        return false;
+        return tips;
     }
 
     public async Task<bool> StashPushAsync(string workspacePath, CancellationToken cancellationToken = default)

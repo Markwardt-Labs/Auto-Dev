@@ -59,6 +59,38 @@ public sealed class ScriptTabViewTests
     });
 
     [Fact]
+    public void PagerNavigation_ResetsScrollToTopOfEarlierPageAndBackToBottomOfTheNewest() => TestAppBuilder.RunOnUiThread(() =>
+    {
+        // ~50,400 chars of realistic (many short lines) output - several pages at outputPageSize's 20,000.
+        string output = string.Concat(Enumerable.Repeat("a line of realistic-length console output\n", 1200));
+        metadataStore
+            .Setup(store => store.LoadScriptRunsAsync("/workspace", "Scripts/Test.cs", It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new ScriptRunRecord { FilePath = "Scripts/Test.cs", FileName = "Test", Success = true, Output = output }]);
+
+        ScriptTabViewModel viewModel = new("/workspace", metadataStore.Object, scriptRunner.Object, clipboardService.Object, dispatcher.Object);
+        viewModel.SelectScript("Scripts/Test.cs", "Test");
+
+        ScriptTabView view = new() { DataContext = viewModel };
+        Window window = new() { Content = view, Width = 300, Height = 150 };
+        window.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        ScrollViewer scroller = view.FindControl<ScrollViewer>("Scroller")!;
+        Assert.True(viewModel.HasMultiplePages);
+
+        viewModel.PreviousPageCommand.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(0, scroller.Offset.Y);
+
+        viewModel.NextPageCommand.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(
+            scroller.Offset.Y + scroller.Viewport.Height >= scroller.Extent.Height - 2.0,
+            $"Expected to be scrolled to the bottom of the newest page again (Offset={scroller.Offset.Y}, Viewport={scroller.Viewport.Height}, Extent={scroller.Extent.Height}).");
+    });
+
+    [Fact]
     public void SwitchingEntries_ResetsAutoScrollEvenIfThePreviousOneWasScrolledAway() => TestAppBuilder.RunOnUiThread(() =>
     {
         LiveScriptRun liveRunA = new();

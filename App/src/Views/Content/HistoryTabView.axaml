@@ -49,7 +49,7 @@
             <!-- Flat local-branch list (current branch first, then alphabetical - see
                  IWorkspaceVersioningService.ListAllBranchesAsync) - no more parent/child hierarchy, since the
                  task language's own "branches have a parent" convention is gone; every git action other than
-                 Commit/Reset (which live on the Version section itself - see VersionSectionView) lives on each
+                 Commit/Reset/Branch/Tag/Remote (which live on the Version section itself - see VersionSectionView) lives on each
                  row's right-click menu instead. -->
             <ItemsControl Grid.Column="0" ItemsSource="{Binding BranchRows}" Padding="6,10,4,10">
                 <ItemsControl.ItemTemplate>
@@ -61,11 +61,29 @@
                                     <MenuItem Header="Checkout" IsVisible="{Binding !Branch.IsCurrent}"
                                               Command="{Binding $parent[UserControl].((vm:HistoryTabViewModel)DataContext).CheckoutCommand}"
                                               CommandParameter="{Binding Branch.Name}" />
-                                    <MenuItem Header="Merge Into Current" IsVisible="{Binding !Branch.IsCurrent}"
-                                              Command="{Binding $parent[UserControl].((vm:HistoryTabViewModel)DataContext).MergeIntoCurrentCommand}"
+                                    <!-- Squash/Rebase/Merge each in both directions, every label naming both branches
+                                         (see BranchRowViewModel) - only offered while there's a current branch for the
+                                         clicked one to be relative to. -->
+                                    <Separator IsVisible="{Binding HasCurrentBranch}" />
+                                    <MenuItem IsVisible="{Binding HasCurrentBranch}" Header="{Binding SquashCurrentHeader}"
+                                              Command="{Binding $parent[UserControl].((vm:HistoryTabViewModel)DataContext).SquashCurrentCommand}"
                                               CommandParameter="{Binding Branch.Name}" />
-                                    <MenuItem Header="Rebase Current Onto This" IsVisible="{Binding !Branch.IsCurrent}"
-                                              Command="{Binding $parent[UserControl].((vm:HistoryTabViewModel)DataContext).RebaseCurrentOntoCommand}"
+                                    <MenuItem IsVisible="{Binding HasCurrentBranch}" Header="{Binding SquashSelectedHeader}"
+                                              Command="{Binding $parent[UserControl].((vm:HistoryTabViewModel)DataContext).SquashSelectedCommand}"
+                                              CommandParameter="{Binding Branch.Name}" />
+                                    <Separator IsVisible="{Binding HasCurrentBranch}" />
+                                    <MenuItem IsVisible="{Binding HasCurrentBranch}" Header="{Binding RebaseCurrentHeader}"
+                                              Command="{Binding $parent[UserControl].((vm:HistoryTabViewModel)DataContext).RebaseCurrentCommand}"
+                                              CommandParameter="{Binding Branch.Name}" />
+                                    <MenuItem IsVisible="{Binding HasCurrentBranch}" Header="{Binding RebaseSelectedHeader}"
+                                              Command="{Binding $parent[UserControl].((vm:HistoryTabViewModel)DataContext).RebaseSelectedCommand}"
+                                              CommandParameter="{Binding Branch.Name}" />
+                                    <Separator IsVisible="{Binding HasCurrentBranch}" />
+                                    <MenuItem IsVisible="{Binding HasCurrentBranch}" Header="{Binding MergeCurrentHeader}"
+                                              Command="{Binding $parent[UserControl].((vm:HistoryTabViewModel)DataContext).MergeCurrentCommand}"
+                                              CommandParameter="{Binding Branch.Name}" />
+                                    <MenuItem IsVisible="{Binding HasCurrentBranch}" Header="{Binding MergeSelectedHeader}"
+                                              Command="{Binding $parent[UserControl].((vm:HistoryTabViewModel)DataContext).MergeSelectedCommand}"
                                               CommandParameter="{Binding Branch.Name}" />
                                     <Separator IsVisible="{Binding !Branch.IsCurrent}" />
                                     <MenuItem Header="Delete" IsVisible="{Binding !Branch.IsCurrent}"

@@ -121,6 +121,19 @@
             </Grid>
         </Border>
 
+        <!-- Only shown once the output is actually split across more than one page (see
+             ScriptTabViewModel.HasMultiplePages/outputPageSize) - the overwhelmingly common case (output that
+             fits in one page) shows no pager at all. -->
+        <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto,*,Auto" Margin="14,6"
+              IsVisible="{Binding HasMultiplePages}">
+            <Button Grid.Column="0" Classes="iconButton" Command="{Binding PreviousPageCommand}"
+                    Content="◀" ToolTip.Tip="Previous page" />
+            <TextBlock Grid.Column="1" Text="{Binding PageLabel}" HorizontalAlignment="Center"
+                       FontSize="11" Foreground="{DynamicResource TextMutedBrush}" />
+            <Button Grid.Column="2" Classes="iconButton" Command="{Binding NextPageCommand}"
+                    Content="▶" ToolTip.Tip="Next page" />
+        </Grid>
+
         <!-- A DockPanel only gives HorizontalAlignment/VerticalAlignment room to work with on its LAST
              child (LastChildFill) - these two are mutually-exclusive alternates for the same body area, so
              they're grouped in their own Grid where every child gets the full remaining space to center in. -->
@@ -131,7 +144,9 @@
                        Foreground="{DynamicResource TextMutedBrush}" FontSize="13" />
 
             <ScrollViewer IsVisible="{Binding HasScript}" Name="Scroller">
-                <SelectableTextBlock Text="{Binding OutputText}" TextWrapping="Wrap" Margin="14,10,14,14"
+                <!-- Bound to DisplayedPageText, not the full (unbounded) OutputText - see
+                     ScriptTabViewModel.outputPageSize's own doc comment for why. -->
+                <SelectableTextBlock Text="{Binding DisplayedPageText}" TextWrapping="Wrap" Margin="14,10,14,14"
                                       FontFamily="Cascadia Code,Consolas,DejaVu Sans Mono,Liberation Mono,monospace" FontSize="12" />
             </ScrollViewer>
         </Grid>

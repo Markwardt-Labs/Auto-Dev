@@ -91,7 +91,7 @@ public interface IWorkspaceVersioningService
 
     Task<bool> HasUncommittedChangesAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Fetches (+prunes deleted remote branches), then hard-resets every local branch OTHER than the currently checked-out one to match its remote-tracking counterpart wherever they differ - so local work in progress on the checked-out branch is never silently overwritten this way. If the checked-out branch's own remote counterpart is what got pruned (deleted on the remote, e.g. by this app's own post-merge cleanup - see VersionSectionViewModel.MergeAsync), that branch is detached (checked out by commit hash, so pending changes are untouched) and then deleted locally too, rather than left pointing at nothing. Best-effort - a missing/unreachable remote is silently ignored, same tolerance as every other remote call here.</summary>
+    /// <summary>Fetches (+prunes deleted remote branches), then hard-resets every local branch OTHER than the currently checked-out one to match its remote-tracking counterpart wherever they differ - so local work in progress on the checked-out branch is never silently overwritten this way. If the checked-out branch's own remote counterpart is what got pruned (deleted on the remote, e.g. by this app's own post-merge cleanup - see HistoryTabViewModel's Merge actions), that branch is detached (checked out by commit hash, so pending changes are untouched) and then deleted locally too, rather than left pointing at nothing. Best-effort - a missing/unreachable remote is silently ignored, same tolerance as every other remote call here.</summary>
     Task SyncWithRemoteAsync(CancellationToken cancellationToken = default);
 
     /// <summary>The checked-out branch (if any), HEAD's own commit hash, and whether there were pending changes, right before a mutating busy action starts - see RevertToSnapshotAsync, which the busy overlay's Cancel button uses to undo whatever the action had done so far.</summary>
@@ -111,7 +111,7 @@ public interface IWorkspaceVersioningService
     /// <summary>`git branch -D` - callers confirm with the user first.</summary>
     Task DeleteBranchAsync(string name, CancellationToken cancellationToken = default);
 
-    /// <summary>Deletes `name` locally, then on the remote too if one's configured - used to clean up a branch once its work has been merged elsewhere (see VersionSectionViewModel.MergeAsync/HistoryTabViewModel.MergeIntoCurrentAsync). Local deletion always runs regardless; true unless a configured remote's own deletion push actually fails (no remote at all is not a failure - nothing to clean up there).</summary>
+    /// <summary>Deletes `name` locally, then on the remote too if one's configured - used to clean up a branch once its work has been merged elsewhere (see HistoryTabViewModel's Merge actions). Local deletion always runs regardless; true unless a configured remote's own deletion push actually fails (no remote at all is not a failure - nothing to clean up there).</summary>
     Task<bool> DeleteBranchEverywhereAsync(string name, CancellationToken cancellationToken = default);
 
     /// <summary>`git tag -d` - callers confirm with the user first.</summary>
@@ -123,19 +123,9 @@ public interface IWorkspaceVersioningService
     /// <summary>Discards all pending changes (`git reset --hard` + `git clean -fd`). Destructive; callers confirm with the user first.</summary>
     Task ResetAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Rebases the currently checked-out branch onto `ontoRef`.</summary>
-    Task<GitOperationOutcome> RebaseAsync(string ontoRef, CancellationToken cancellationToken = default);
-
     Task<GitOperationOutcome> ContinueRebaseAsync(CancellationToken cancellationToken = default);
 
     Task AbortRebaseAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>Merges `sourceBranch` into the currently checked-out branch - a real merge commit if it can't fast-forward.</summary>
-    Task<GitOperationOutcome> MergeAsync(string sourceBranch, CancellationToken cancellationToken = default);
-
-    Task<GitOperationOutcome> ContinueMergeAsync(CancellationToken cancellationToken = default);
-
-    Task AbortMergeAsync(CancellationToken cancellationToken = default);
 
     Task<bool> HasConflictsAsync(CancellationToken cancellationToken = default);
 
@@ -143,8 +133,8 @@ public interface IWorkspaceVersioningService
 
     Task CommitAsync(string message, CancellationToken cancellationToken = default);
 
-    /// <summary>Pushes the currently checked-out branch, if any - used once a Rebase/Merge/Squash's own local work is done (CreateBranchAsync/CreateTagAsync/CommitAsync push inline themselves, since they're single synchronous operations with no external continuation step in between). True if there was nothing to push (no branch checked out) or the push itself succeeded; false only on an actual push failure, so the caller can surface it (see VersionSectionViewModel.MarkFailed) instead of silently treating an unpushed local change as if everything succeeded.</summary>
-    Task<bool> PushCurrentBranchAsync(bool force, CancellationToken cancellationToken = default);
+    /// <summary>Pushes `branchName` to the remote (`force` rewrites its remote history, needed after a squash/rebase) - used once a Squash/Rebase/Merge's own local work is done (CreateBranchAsync/CreateTagAsync/CommitAsync push inline themselves, since they're single synchronous operations with no external continuation step in between). True if there's no remote configured at all (nothing to push to) or the push succeeded; false only on an actual push failure, so the caller can surface it (see VersionSectionViewModel.MarkFailed) instead of silently treating an unpushed local change as if everything succeeded.</summary>
+    Task<bool> PushBranchAsync(string branchName, bool force, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Fast-forwards the currently checked-out branch onto `origin/{that branch}` - assumes the caller already
@@ -164,23 +154,31 @@ public interface IWorkspaceVersioningService
     /// <summary>Checks out a branch, tag, or arbitrary commit - attaches HEAD to it if it's a branch name, otherwise detaches at that exact spot. Caller is responsible for confirming discard of pending changes first.</summary>
     Task CheckoutRefAsync(string refName, CancellationToken cancellationToken = default);
 
-    /// <summary>Local branches that make sense as a Squash/Rebase base for the currently checked-out branch - every other local branch except the current one and any that's already a git ancestor of it (squashing back to, or rebasing onto, an ancestor would be a no-op/degenerate). Empty while HEAD is detached.</summary>
-    Task<IReadOnlyList<string>> GetEligibleBaseBranchesAsync(CancellationToken cancellationToken = default);
+    /// <summary>The subject of `branchName`'s tip commit - the default commit message offered when squashing that branch.</summary>
+    Task<string> GetDefaultSquashMessageAsync(string branchName, CancellationToken cancellationToken = default);
 
-    /// <summary>The subject of the first commit unique to the current branch since diverging from `baseBranch` (i.e. right after their merge-base) - the Squash/Rebase dialogs' own default commit message. Empty if the current branch has no commits of its own since that point.</summary>
-    Task<string> GetDefaultSquashMessageAsync(string baseBranch, CancellationToken cancellationToken = default);
+    /// <summary>How many commits `branchName` has that `baseBranch` doesn't (`git log baseBranch..branchName`) - what Squash collapses into one, and what Rebase/Merge use to decide whether a squash is needed first.</summary>
+    Task<int> CountUniqueCommitsAsync(string branchName, string baseBranch, CancellationToken cancellationToken = default);
 
-    /// <summary>Collapses every commit unique to the current branch since diverging from `baseBranch` into one (see IGitService.SquashSinceAsync), then force-pushes - see SquashOutcome. Never pushes if the squash itself failed.</summary>
-    Task<SquashOutcome> SquashAsync(string baseBranch, string message, CancellationToken cancellationToken = default);
+    /// <summary>True if `baseBranch`'s tip is already part of `branchName`'s history (`branchName` is built on top of it) - nothing left to rebase, and `baseBranch` can be fast-forwarded to `branchName`.</summary>
+    Task<bool> IsBasedOnAsync(string branchName, string baseBranch, CancellationToken cancellationToken = default);
 
-    /// <summary>Rebases the current branch onto `ontoBranch`, always squashing the current branch's own commits since diverging from `ontoBranch` first (see SquashAsync, minus the intermediate push) so only that single commit ever gets replayed - a rebase can't offer a meaningful per-commit conflict-resolution loop otherwise, since AI conflict resolution (see VersionSectionViewModel.ResolveConflictsAsync) only gets one shot at the whole diff, not one per original commit.</summary>
-    Task<GitOperationOutcome> RebaseWithSquashAsync(string ontoBranch, string squashMessage, CancellationToken cancellationToken = default);
+    /// <summary>Collapses every commit `branchName` has that `baseBranch` doesn't into one commit with `message` (see IGitService.SquashBranchAsync - works whether or not `branchName` is checked out), then force-pushes `branchName` - see SquashOutcome. Never pushes if the squash itself failed.</summary>
+    Task<SquashOutcome> SquashAsync(string branchName, string baseBranch, string message, CancellationToken cancellationToken = default);
 
-    /// <summary>Local branches current can be fast-forward merged onto - every other local branch that's already a git ancestor of current (the opposite filter from GetEligibleBaseBranchesAsync: only a branch current is strictly ahead of can be fast-forwarded to match it). Empty while HEAD is detached.</summary>
-    Task<IReadOnlyList<string>> GetEligibleMergeTargetBranchesAsync(CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Rebases `branchName` onto `ontoBranch`'s tip - first squashing its own commits since diverging into one
+    /// with `squashMessage` if that's non-null (so only a single commit ever gets replayed - AI conflict
+    /// resolution, see VersionSectionViewModel.ResolveConflictsAsync, only gets one shot at the whole diff, not
+    /// one per original commit). Succeeds without rebasing if `branchName` is already built on `ontoBranch`.
+    /// When `branchName` isn't the checked-out branch it's checked out first (git can only rebase in the
+    /// working tree), and left checked out afterward - callers return to whichever branch they started on, and
+    /// need a clean working tree to begin with. Doesn't push - see PushBranchAsync.
+    /// </summary>
+    Task<GitOperationOutcome> RebaseAsync(string branchName, string ontoBranch, string? squashMessage, CancellationToken cancellationToken = default);
 
-    /// <summary>Fast-forwards `targetBranch` to match the current branch - false if current isn't actually based on `targetBranch`'s own head (the fast-forward precondition), which leaves the original branch back checked out same as before the call. Squashes the current branch's own commits since diverging from `targetBranch` into one first, but only if there's more than one - a single commit needs no squashing before being fast-forwarded onto. On success, ends up checked out on `targetBranch` (not back on the original current branch) - see VersionSectionViewModel.MergeAsync, which deletes the original branch immediately afterward, which isn't possible while it's still checked out.</summary>
-    Task<bool> FastForwardMergeAsync(string targetBranch, string? squashMessage, CancellationToken cancellationToken = default);
+    /// <summary>Fast-forwards `targetBranch` to `sourceBranch`'s tip, leaving `targetBranch` checked out (checked out first if it wasn't - the original branch is checked back out if that fails). False, with nothing moved, unless `targetBranch` is already part of `sourceBranch`'s history (the fast-forward precondition) and, if `targetBranch` wasn't checked out, the checkout actually took (pending changes can block it). Doesn't push - see PushBranchAsync.</summary>
+    Task<bool> FastForwardAsync(string targetBranch, string sourceBranch, CancellationToken cancellationToken = default);
 
     // --- History tab ---
 

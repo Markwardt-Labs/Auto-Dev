@@ -2,16 +2,15 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:AutoDev.ViewModels.Sidebar"
              xmlns:conv="using:Avalonia.Data.Converters"
-             xmlns:aconv="using:AutoDev.Converters"
              x:Class="AutoDev.Views.Sidebar.VersionSectionView"
              x:DataType="vm:VersionSectionViewModel">
     <!-- A passive display - the branch name (if any), tag name (if any), HEAD's own commit message and short
          hash, all centered - plus this section's own click-to-open menu for every action that targets the
-         current branch directly (Commit/Reset/Branch/Tag/Remote always; Squash/Rebase/Merge only while
-         targeting a branch). Every other git action lives on the History tab's branch/commit/tag right-click
-         context menus instead - see HistoryTabViewModel. Pending changes show as an asterisk in the top-right
-         corner and a highlighted background over the whole section, rather than a separate badge. A failed
-         action shows an OK popup (see VersionSectionViewModel) instead of a persistent label here. -->
+         current branch directly (Commit/Reset/Branch/Tag/Remote). Every other git action (including
+         Squash/Rebase/Merge) lives on the History tab's branch/commit/tag right-click context menus
+         instead - see HistoryTabViewModel. Pending changes show as an asterisk in the top-right corner and a
+         highlighted background over the whole section, rather than a separate badge. A failed action shows an
+         OK popup (see VersionSectionViewModel) instead of a persistent label here. -->
     <Button Classes="versionSection" Classes.pendingChanges="{Binding HasPendingChanges}">
         <Button.Flyout>
             <MenuFlyout Placement="BottomEdgeAlignedLeft">
@@ -21,13 +20,6 @@
                 <MenuItem Header="Branch" Command="{Binding BranchCommand}" />
                 <MenuItem Header="Tag" Command="{Binding TagCommand}" />
                 <MenuItem Header="Remote" Command="{Binding RemoteCommand}" />
-                <Separator IsVisible="{Binding Target.Kind, Converter={x:Static aconv:EnumEqualsConverter.Instance}, ConverterParameter=Branch}" />
-                <MenuItem Header="Squash" Command="{Binding SquashCommand}"
-                          IsVisible="{Binding Target.Kind, Converter={x:Static aconv:EnumEqualsConverter.Instance}, ConverterParameter=Branch}" />
-                <MenuItem Header="Rebase" Command="{Binding RebaseCommand}"
-                          IsVisible="{Binding Target.Kind, Converter={x:Static aconv:EnumEqualsConverter.Instance}, ConverterParameter=Branch}" />
-                <MenuItem Header="Merge" Command="{Binding MergeCommand}"
-                          IsVisible="{Binding Target.Kind, Converter={x:Static aconv:EnumEqualsConverter.Instance}, ConverterParameter=Branch}" />
             </MenuFlyout>
         </Button.Flyout>
         <Grid>

@@ -106,7 +106,7 @@ request's own `Output` with whichever text block arrived most recently
 each new segment replacing the last, rather than staying empty until the turn fully finishes. The
 latest `tool_use` block separately updates `GenerateRequestViewModel.CurrentAction` with a friendly
 one-liner (`DescribeToolUse`: "Reading Foo.cs", "Running: npm test", "Searching for \"...\"", etc.,
-falling back to `"Using {ToolName}"` for anything unrecognized) for the status box above it.
+falling back to `"Using {ToolName}"` for anything unrecognized) for the status box above it (capped at about three lines, with overflow scrolling) - the submitted-input box above that one is capped at 6 lines the same way.
 
 On `ResultEvent`: `Output` is set from the event's own clean final text (preferred over the
 streamed buffer, which mixes in intermediate narration like "let me check that" ahead of the real

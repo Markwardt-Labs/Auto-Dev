@@ -77,6 +77,7 @@ public sealed partial class ScriptTabView : UserControl
         {
             vm.PropertyChanged += OnVmPropertyChanged;
             vm.DisplayedEntryChanged += OnDisplayedEntryChanged;
+            vm.PageNavigated += OnPageNavigated;
             subscribedVm = vm;
         }
     }
@@ -90,6 +91,7 @@ public sealed partial class ScriptTabView : UserControl
 
         subscribedVm.PropertyChanged -= OnVmPropertyChanged;
         subscribedVm.DisplayedEntryChanged -= OnDisplayedEntryChanged;
+        subscribedVm.PageNavigated -= OnPageNavigated;
         subscribedVm = null;
     }
 
@@ -106,7 +108,7 @@ public sealed partial class ScriptTabView : UserControl
 
     private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs args)
     {
-        if (args.PropertyName != nameof(ScriptTabViewModel.OutputText))
+        if (args.PropertyName != nameof(ScriptTabViewModel.DisplayedPageText))
         {
             return;
         }
@@ -120,6 +122,34 @@ public sealed partial class ScriptTabView : UserControl
             if (isScrolledToBottom)
             {
                 scroller?.ScrollToEnd();
+            }
+        }, DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// An explicit page swap (see ScriptTabViewModel.PageNavigated's own doc comment on why this is separate
+    /// from OnVmPropertyChanged's own in-place-growth handling) - jumping to the newest page resumes following
+    /// it (scrolls to its end, same as arriving there via ongoing output growth would), while paging to any
+    /// earlier, already-complete page starts the reader at its own top instead.
+    /// </summary>
+    private void OnPageNavigated()
+    {
+        if (DataContext is not ScriptTabViewModel vm || scroller is null)
+        {
+            return;
+        }
+
+        bool isLastPage = vm.PageIndex == vm.PageCount - 1;
+        isScrolledToBottom = isLastPage;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (isLastPage)
+            {
+                scroller.ScrollToEnd();
+            }
+            else
+            {
+                scroller.ScrollToHome();
             }
         }, DispatcherPriority.Background);
     }

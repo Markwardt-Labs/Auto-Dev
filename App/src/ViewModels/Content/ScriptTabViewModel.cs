@@ -61,6 +61,34 @@ public sealed partial class ScriptTabViewModel : ViewModelBase, IDisposable
     private LiveScriptRun? liveRun;
     private PropertyChangedEventHandler? liveRunHandler;
 
+    /// <summary>
+    /// How many characters of OutputText each page (see DisplayedPageText) holds. Character-based, not
+    /// line-based - deliberately so, since computing a page's own text is then a plain O(pageSize) substring
+    /// regardless of how much output has accumulated in total, rather than needing to scan/count lines across
+    /// everything printed so far. Binding the whole (unbounded) OutputText straight to a TextBlock is what
+    /// made a long-running script's output progressively slower to render the longer it ran - Avalonia's
+    /// TextBlock/SelectableTextBlock has no incremental reflow, so replacing its Text re-lays out the entire
+    /// accumulated document every time, even with LiveScriptRun's own notification throttling already in
+    /// place (see its own doc comment) capping how *often* that happens. Pagination bounds how much text is
+    /// ever bound at once instead, decoupling render cost from total output size entirely. A page can split a
+    /// line in the middle - an accepted, purely cosmetic tradeoff for keeping this simple and fast.
+    /// Measured empirically (a plain SelectableTextBlock, TextWrapping="Wrap"): ordinary multi-line output
+    /// lays out fast even well past this size (~100k chars, ~2000 lines, under a second), but Avalonia's own
+    /// line-breaking search degrades sharply on one long unbroken run with nothing to wrap on (a giant
+    /// minified-JSON line, say) - 40k such characters alone took multiple seconds. Sized well under that
+    /// worst case rather than tuned for the (much more forgiving) common case.
+    /// </summary>
+    private static readonly int outputPageSize = 20_000;
+
+    /// <summary>
+    /// True while the displayed page should keep tracking the newest one as more output streams in - the
+    /// common "tail -f" case, matching the ScriptTabView's own existing scroll-to-bottom auto-follow. Starts
+    /// true, reset true whenever a fresh run starts or the displayed script/task changes (see OnAnyRunStarted/
+    /// AttachOrLoad), and set false the instant the user navigates to an earlier page (PreviousPage) - Next
+    /// re-enables it once paging back forward actually reaches the newest page again.
+    /// </summary>
+    private bool followLatestPage = true;
+
     public ScriptTabViewModel(string workspacePath, IWorkspaceMetadataStore metadataStore, IWorkspaceScriptRunner scriptRunner, IClipboardService clipboardService, IUiDispatcher dispatcher)
     {
         this.workspacePath = workspacePath;
@@ -113,7 +141,73 @@ public sealed partial class ScriptTabViewModel : ViewModelBase, IDisposable
     [ObservableProperty]
     private string outputText = "";
 
-    partial void OnOutputTextChanged(string value) => CopyOutputCommand.NotifyCanExecuteChanged();
+    partial void OnOutputTextChanged(string value)
+    {
+        CopyOutputCommand.NotifyCanExecuteChanged();
+        RecomputePage(value);
+    }
+
+    /// <summary>The current page's own slice of OutputText (see outputPageSize) - what the View actually binds/renders. CopyOutputAsync still copies the full OutputText regardless of which page is currently displayed.</summary>
+    [ObservableProperty]
+    private string displayedPageText = "";
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(PreviousPageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(NextPageCommand))]
+    [NotifyPropertyChangedFor(nameof(PageLabel))]
+    private int pageIndex;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(PreviousPageCommand))]
+    [NotifyCanExecuteChangedFor(nameof(NextPageCommand))]
+    [NotifyPropertyChangedFor(nameof(PageLabel))]
+    [NotifyPropertyChangedFor(nameof(HasMultiplePages))]
+    private int pageCount = 1;
+
+    public string PageLabel => $"Page {PageIndex + 1} of {PageCount}";
+
+    /// <summary>False for the overwhelmingly common case (output that fits in one page) - the pager only shows once there's actually more than one to page through.</summary>
+    public bool HasMultiplePages => PageCount > 1;
+
+    /// <summary>Raised only by an explicit PreviousPage/NextPage click - never by DisplayedPageText simply growing in place while following the newest page - so the View (see ScriptTabView.OnPageNavigated) knows to reset scroll position for an actual page swap, rather than keep applying its usual scroll-to-bottom-if-already-there behavior meant for in-place growth.</summary>
+    public event Action? PageNavigated;
+
+    private void RecomputePage(string text)
+    {
+        int newPageCount = Math.Max(1, (int)Math.Ceiling(text.Length / (double)outputPageSize));
+        PageCount = newPageCount;
+        PageIndex = followLatestPage ? newPageCount - 1 : Math.Clamp(PageIndex, 0, newPageCount - 1);
+        UpdateDisplayedPageText(text);
+    }
+
+    private void UpdateDisplayedPageText(string text)
+    {
+        int start = PageIndex * outputPageSize;
+        int length = Math.Min(outputPageSize, text.Length - start);
+        DisplayedPageText = length > 0 ? text.Substring(start, length) : "";
+    }
+
+    private bool CanPreviousPage() => PageIndex > 0;
+
+    [RelayCommand(CanExecute = nameof(CanPreviousPage))]
+    private void PreviousPage()
+    {
+        followLatestPage = false;
+        PageIndex--;
+        UpdateDisplayedPageText(OutputText);
+        PageNavigated?.Invoke();
+    }
+
+    private bool CanNextPage() => PageIndex < PageCount - 1;
+
+    [RelayCommand(CanExecute = nameof(CanNextPage))]
+    private void NextPage()
+    {
+        PageIndex++;
+        followLatestPage = PageIndex == PageCount - 1;
+        UpdateDisplayedPageText(OutputText);
+        PageNavigated?.Invoke();
+    }
 
     /// <summary>Not-yet-sent text for the running script's own stdin (see SendInputAsync) - a script that calls Console.ReadLine() would otherwise hang forever, since nothing else in AutoDev ever supplies it input.</summary>
     [ObservableProperty]
@@ -298,6 +392,7 @@ public sealed partial class ScriptTabViewModel : ViewModelBase, IDisposable
     {
         DisplayedEntryChanged?.Invoke();
         DetachLiveRun();
+        followLatestPage = true;
 
         if (entry is null)
         {
@@ -462,6 +557,7 @@ public sealed partial class ScriptTabViewModel : ViewModelBase, IDisposable
         LastRunFailed = false;
         LastRunWasStopped = false;
         ExitCode = null;
+        followLatestPage = true;
         OutputText = "";
 
         if (scriptRunner.GetLiveRun(script.Path) is { } liveRun)

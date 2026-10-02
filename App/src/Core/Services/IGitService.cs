@@ -132,12 +132,6 @@ public interface IGitService
 
     Task RebaseAbortAsync(string workspacePath, CancellationToken cancellationToken = default);
 
-    /// <summary>`git merge branchName` into the current HEAD - a real merge commit if it can't fast-forward, exactly like the plain git command.</summary>
-    Task<GitOperationOutcome> MergeAsync(string workspacePath, string branchName, CancellationToken cancellationToken = default);
-
-    /// <summary>`git merge --continue` - finishes an in-progress merge once its conflicts are resolved and staged.</summary>
-    Task<GitOperationOutcome> MergeContinueAsync(string workspacePath, CancellationToken cancellationToken = default);
-
     Task MergeAbortAsync(string workspacePath, CancellationToken cancellationToken = default);
 
     Task<bool> HasConflictsAsync(string workspacePath, CancellationToken cancellationToken = default);
@@ -202,7 +196,7 @@ public interface IGitService
     /// <summary>Fetches then fast-forwards the current branch onto `origin/{branchName}`. False if it can't fast-forward (real divergence) or there's no remote.</summary>
     Task<bool> FastForwardPullAsync(string workspacePath, string branchName, CancellationToken cancellationToken = default);
 
-    /// <summary>`git merge --ff-only refName` against the currently checked-out branch - false (no merge commit, no partial state) if it can't fast-forward. Used by the Version section's Merge action, which validates the fast-forward precondition itself before calling this - see WorkspaceVersioningService.FastForwardMergeAsync.</summary>
+    /// <summary>`git merge --ff-only refName` against the currently checked-out branch - false (no merge commit, no partial state) if it can't fast-forward. Used by the History tab's Merge actions, which validate the fast-forward precondition themselves first - see WorkspaceVersioningService.FastForwardAsync.</summary>
     Task<bool> FastForwardMergeAsync(string workspacePath, string refName, CancellationToken cancellationToken = default);
 
     /// <summary>`git merge-base --is-ancestor ancestorRef descendantRef` - true if `ancestorRef` is reachable from `descendantRef`. Used both to filter Squash/Rebase's own base-branch picker down to branches that have actually diverged (excluded, since either action would be a no-op against an already-merged-in ancestor) and, the other way round, to filter Merge's own target-branch picker down to branches current is actually ahead of (included, since only those can be fast-forwarded).</summary>
@@ -211,8 +205,11 @@ public interface IGitService
     /// <summary>`git merge-base refA refB` - the commit both refs' histories share.</summary>
     Task<string> MergeBaseAsync(string workspacePath, string refA, string refB, CancellationToken cancellationToken = default);
 
-    /// <summary>Collapses every commit since `sinceRef` (exclusive) into one new commit at HEAD with `message` - `git reset --soft sinceRef` followed by `git commit`, which preserves HEAD's current tree/index exactly and only changes how many commits it took to get there. False (with the branch restored to where it was) if the commit fails.</summary>
-    Task<bool> SquashSinceAsync(string workspacePath, string sinceRef, string message, CancellationToken cancellationToken = default);
+    /// <summary>Collapses every commit on `branchName` since `sinceRef` (exclusive) into one new commit with `message`, without checking anything out or touching the working tree: `git commit-tree` builds the commit from the branch tip's own tree on top of `sinceRef`, then `git update-ref` moves the branch to it (only if it still points where it did). Works the same for the checked-out branch, whose working tree and index already match that tree. False, with the branch untouched, if either step fails.</summary>
+    Task<bool> SquashBranchAsync(string workspacePath, string branchName, string sinceRef, string message, CancellationToken cancellationToken = default);
+
+    /// <summary>Every local branch's tip commit, by branch name (`git for-each-ref refs/heads`) - what a busy action's pre-action snapshot records so a cancel can restore branches the action rewrote or deleted without ever checking them out.</summary>
+    Task<IReadOnlyDictionary<string, string>> GetLocalBranchTipsAsync(string workspacePath, CancellationToken cancellationToken = default);
 
     /// <summary>`git stash push -u` (`-u` also grabs untracked files, not just tracked modifications) - false if the stash itself failed (rare; e.g. an in-progress merge/rebase git refuses to stash over). Callers only ever call this once they've already confirmed there's something pending to stash (see WorkspaceVersioningService.PullCurrentBranchWithStashAsync) - unlike a plain `git stash push` with nothing to stash, which exits 0 having done nothing, this is never called in a state where that ambiguity would matter.</summary>
     Task<bool> StashPushAsync(string workspacePath, CancellationToken cancellationToken = default);

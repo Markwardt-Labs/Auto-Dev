@@ -9,9 +9,6 @@ Avalonia-free - anything needing a native window goes through it:
 Task<string?> PickFolderAsync();
 Task<string?> ShowInputDialogAsync(string title, string label, string initialValue = "", bool requireValue = false);
 Task<bool> ShowConfirmDialogAsync(string title, string message, string confirmLabel = "Delete", bool isDestructive = true);
-Task<SquashDialogResult?> ShowSquashDialogAsync(IReadOnlyList<string> branches, Func<string, Task<string>> defaultMessageProvider);
-Task<RebaseDialogResult?> ShowRebaseDialogAsync(IReadOnlyList<string> branches, Func<string, Task<string>> defaultMessageProvider);
-Task<MergeDialogResult?> ShowMergeDialogAsync(IReadOnlyList<string> branches, Func<string, Task<string>> defaultMessageProvider);
 Task ShowMessageDialogAsync(string title, string message);
 ```
 
@@ -20,9 +17,11 @@ Task ShowMessageDialogAsync(string title, string message);
 `DataContext`, and awaits `window.ShowDialog<T>(OwnerWindow)`. Creating a new tag has no dialog of
 its own - it's just `ShowInputDialogAsync("Tag", "Tag name")`, since AutoDev's own tags are always
 annotated (`IGitService.CreateAnnotatedTagAsync`) with a deliberately blank message; there's nothing
-else to prompt for.
+else to prompt for. Likewise Squash/Rebase/Merge have no dialogs of their own - the squash message is
+just `ShowInputDialogAsync` with the branch's last commit message as the initial value (see
+HistoryTabViewModel.PromptSquashMessageAsync).
 
-Six dialog view models cover every modal in the app:
+Three generic dialog view models cover the plain modals:
 
 - **`InputDialogViewModel`** - single text field. `RequireValue: true` hides Cancel and blocks the
   native close button/Escape entirely, so confirming a non-blank value is the only way out (used
@@ -30,20 +29,12 @@ Six dialog view models cover every modal in the app:
   TagAsync - where blank isn't a meaningful answer).
 - **`ConfirmDialogViewModel`** - yes/no, with a configurable `ConfirmLabel` (default `"Delete"`)
   and `IsDestructive` (default `true`, drives red-button styling).
-- **`SquashDialogViewModel`** - a base-branch `ComboBox` (`Branches`/`SelectedBranch`) plus a
-  `Message` field whose default is re-fetched (`messageProvider`, an async delegate the caller
-  supplies) every time the selected branch changes - see VersionSectionViewModel.SquashAsync.
-- **`RebaseDialogViewModel`** - the same shape as `SquashDialogViewModel` (an onto-branch picker
-  plus a `SquashMessage` field with the same re-fetched default) - a rebase always squashes first,
-  so there's no separate toggle - see VersionSectionViewModel.RebaseAsync.
-- **`MergeDialogViewModel`** - same shape again (a target-branch picker plus a message field), for
-  Merge's own conditional squash-if-more-than-one-commit - see VersionSectionViewModel.MergeAsync.
 - **`MessageDialogViewModel`** - `Title`, `Message`, a single OK button - the popup a failed git
   action shows instead of a persistent inline label (see VersionSectionViewModel/
   HistoryTabViewModel, which route every failure message through
   `IDialogService.ShowMessageDialogAsync` now).
 
-All six follow the same shape: `[ObservableProperty]` fields (`MessageDialogViewModel`'s
+All three follow the same shape: `[ObservableProperty]` fields (`MessageDialogViewModel`'s
 `Title`/`Message` are plain `required init` properties instead, since it has nothing to edit),
 `event Action<bool>? RequestClose` (`Action?` with no bool for `MessageDialogViewModel` - there's
 only one way to close it), and a Confirm/Cancel `[RelayCommand]` pair (`MessageDialogViewModel` has

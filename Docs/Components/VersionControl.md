@@ -29,7 +29,7 @@ command.
   directly on the above.
 - **`ViewModels/Sidebar/VersionSectionViewModel`** - a passive display of the current target plus
   the shared busy/lock state every action runs through, the AI-assisted conflict-resolution loop for
-  Rebase/Merge (and the History tab's own stash-pop conflicts), and the stash-aware auto-pull itself
+  the History tab's Rebase/Merge (and its own stash-pop conflicts), and the stash-aware auto-pull itself
   (`PullWithStashIfNeededAsync`).
 - **`ViewModels/Content/HistoryTabViewModel`** - a read-only branch/timeline browser over the same
   service, and the home of every action itself (see below) as a right-click context menu.
@@ -127,18 +127,14 @@ checked-out branch directly, rather than some other row in the History tab:
 | Branch | Prompts for a name, creates a branch at the current target (`HEAD`), checks it out | always |
 | Tag | Prompts for a name, creates an annotated tag (blank message) at the current target | always |
 | Remote | Prompts for and configures the `origin` URL | always |
-| Squash | Prompts for a base branch and message, squashes since diverging from it | targeting a branch |
-| Rebase | Prompts for an onto-branch and (always-applied) squash message, rebases the current branch | targeting a branch |
-| Merge | Prompts for a target branch, fast-forward merges the current branch onto it, then deletes the now-merged original branch both locally and on the remote | targeting a branch |
 
-Squash/Rebase/Merge are only offered while `Target.Kind == GitTargetKind.Branch` - all three need a
-"current branch" to make sense of, so they stay hidden while HEAD is detached at a tag or arbitrary
-commit. A failed action (a branch/tag name collision, an unresolvable rebase, a merge that isn't
-actually fast-forwardable) calls `VersionSectionViewModel.MarkFailed` rather than a persistent
+Squash, Rebase, and Merge aren't here - they're relative to *another* branch, so they live on the
+History tab's branch context menu (see "Actions" below). A failed action (a branch/tag name
+collision, an unresolvable rebase, a merge that isn't actually fast-forwardable) calls `VersionSectionViewModel.MarkFailed` rather than a persistent
 inline label - see "The busy overlay" below for what that actually does.
 
-It also owns the shared busy/lock machinery every action (Commit/Reset/Branch/Tag/Remote/Squash/
-Rebase/Merge here, everything else triggered from the History tab - see below) runs through:
+It also owns the shared busy/lock machinery every action (Commit/Reset/Branch/Tag/Remote here,
+everything else triggered from the History tab - see below) runs through:
 
 - `IsBusy`/`IsAiWorking`/`HasRunningScripts` combined into `IsInteractionBlocked`, which locks the
   sidebar, Edit tab, and History tab's action commands while true. `HasRunningScripts` is set from
@@ -159,11 +155,11 @@ Rebase/Merge here, everything else triggered from the History tab - see below) r
   finds a normal, expected failure (a branch/tag name collision, a rejected push, a merge that isn't
   fast-forwardable, ...): appends `message` to `GitOutputLog` and sets `IsBusyFailed`, which is what
   actually keeps the overlay open afterward. Public (not just used by this class's own actions) -
-  `HistoryTabViewModel`'s own Merge Into Current/Rebase Current Onto This call `_version.MarkFailed`
+  `HistoryTabViewModel`'s own Squash/Rebase/Merge actions call `version.MarkFailed`
   the same way.
 - `ResolveConflictsAsync(outcome, continueAction, cancellationToken)` - the AI-assisted
-  conflict-resolution loop shared by this section's own Rebase and the History tab's
-  Merge/Rebase-onto-this (below).
+  conflict-resolution loop shared by the History tab's Rebase/Merge (below) and the stash-aware
+  pull.
 - A background `periodicSyncTimer` (60s) posts a refresh (fetch/prune + reset any non-current local
   branch to match its remote counterpart, and detach+delete the checked-out branch itself if *its own*
   remote counterpart is what got pruned - see `SyncWithRemoteAsync` below) whenever the section isn't
@@ -235,7 +231,9 @@ accept a trailing `CancellationToken`) - all the way down to `GitService.RunAsyn
 subprocess, not just race to be first past a check. `RunBusyAsync` catches the resulting
 `OperationCanceledException` and calls `RevertToSnapshotAsync(snapshot)` - a generic, action-agnostic
 undo: abort any in-progress rebase/merge, check out the pre-action branch again if a different one
-ended up checked out, then move it back to the pre-action commit hash. The snapshot also records
+ended up checked out, then move it back to the pre-action commit hash. The snapshot also records every
+local branch's tip, so any *other* branch the action rewrote (a squash/rebase of a branch that was never
+checked out) or deleted (a merge's cleanup) is put back too. The snapshot also records
 whether there were pending changes: only a snapshot taken from a clean tree is hard-reset (with
 `git clean`, removing anything the action itself left behind); otherwise a mixed reset moves the branch
 while leaving every file as it is, so cancelling never discards work that was pending before the action
@@ -245,7 +243,7 @@ cancelling closes the overlay immediately once reverted, the same as it always h
 Cancel click already *is* their acknowledgement, so there's nothing for a Confirm step to add here).
 A normal git failure (bad credentials, no permission, a rejected push, ...) never reaches an
 exception at all - it comes back as an ordinary `false`/`GitOperationOutcome.Failed` result, which
-each action's own caller turns into its own `MarkFailed` message (e.g. Rebase's "Rebase failed.").
+each action's own caller turns into its own `MarkFailed` message (e.g. "Rebasing 'x' onto 'y' failed.").
 `RunBusyAsync` also catches any *other* exception as a backstop - reverts the same way, then calls
 `MarkFailed` itself, so something truly unexpected (not a normal git failure, which the `RunAsync`
 overrides described above mean should never throw in the first place) fails exactly as visibly as
@@ -255,44 +253,53 @@ The Cancel/Confirm buttons only matter while `IsBusy` is actually up - during a 
 conflict's own AI-resolution turn (below), `IsBusy` is deliberately dropped so the user can
 watch/interact with the Generate tab, which has its own Cancel for that part of the flow.
 
-### Squash, Rebase, and Merge's branch pickers
+### Squash, Rebase, and Merge
 
-Squash and Rebase (`SquashDialogViewModel`/`RebaseDialogViewModel`) pick from
-`IWorkspaceVersioningService.GetEligibleBaseBranchesAsync()` - every local branch except the
-current one and any that's already a git ancestor of it (`IGitService.IsAncestorAsync`). An
-ancestor branch is excluded because both actions would be a no-op/degenerate against it: rebasing
-onto a branch you're already built on top of replays nothing, and squashing back to it just
-reproduces the same commits some other reachable point already represents.
+All three are on a non-current branch's context menu in the History tab, each in **two directions**
+(six items in all), with every label naming both branches so the direction is never ambiguous.
+With `feature` checked out and `main` right-clicked:
 
-Merge (`MergeDialogViewModel`) picks from the *opposite* filter -
-`GetEligibleMergeTargetBranchesAsync()` returns only branches that current **is** already an
-ancestor-relationship away from being fast-forwardable onto (i.e. branches current is strictly
-ahead of) - the mirror image of Squash/Rebase's list, since a fast-forward is only possible in that
-direction. `FastForwardMergeAsync` re-validates this itself (`merge-base(current, target) ==
-target's own head`) before touching anything and calls `MarkFailed` (see "The busy overlay" above)
-- if it doesn't hold; it never conflicts, since a fast-forward that isn't possible simply doesn't
-happen instead of falling back to a real merge commit. On success it leaves `targetBranch` (not the
-original current branch) checked out specifically so `VersionSectionViewModel.MergeAsync` can then
-delete the original branch, both locally and on the remote (`DeleteBranchEverywhereAsync`) - git
-refuses to delete whichever branch is currently checked out, so staying on it wouldn't allow this.
-`HistoryTabViewModel.MergeIntoCurrentAsync` (a real merge commit, not a fast-forward - see "Actions"
-below) does the same cleanup, but never needs to move HEAD first, since it merges *into* whatever's
-already checked out rather than moving that branch's own tip.
+| Menu item | Operates on | Relative to |
+|---|---|---|
+| Squash 'feature' (current) since 'main' | `feature` | `main` |
+| Squash 'main' since 'feature' (current) | `main` | `feature` |
+| Rebase 'feature' (current) onto 'main' | `feature` | `main` |
+| Rebase 'main' onto 'feature' (current) | `main` | `feature` |
+| Merge 'feature' (current) into 'main' | `feature` (source) | `main` (target) |
+| Merge 'main' into 'feature' (current) | `main` (source) | `feature` (target) |
 
-Whichever branch Squash/Rebase picks, the actual squash boundary is `git merge-base(current,
-picked)` - *not* necessarily the picked branch's own tip - so history still shows the current
-branch forking from the true common ancestor, just with its own commits collapsed to one
-(`IGitService.SquashSinceAsync` = `git reset --soft <merge-base>` + `git commit`, which leaves the
-tree/index untouched and only changes how many commits it took to get there). The default message
-offered (`GetDefaultSquashMessageAsync`) is the subject of the first commit unique to the current
-branch since that merge-base (`IGitService.GetCommitsSinceAsync(mergeBase, "HEAD")[0]`).
+They're hidden while HEAD is detached (nothing to be relative to). `HistoryTabViewModel` has one
+private implementation of each action, taking the branch being changed and the branch it's relative
+to; the six commands just pick which is which (`BranchRowViewModel` builds the labels, doubling any
+`_` in a branch name since a menu header would otherwise read it as an access key).
 
-Rebase always squashes first (`RebaseWithSquashAsync`, no separate toggle - a rebase can't offer a
-meaningful per-commit AI conflict-resolution loop otherwise, since each resolution attempt only
-gets one shot at the whole diff, not one per original commit) against whichever branch was picked,
-so only that one squashed commit ever gets replayed. Merge squashes too, but only conditionally -
-`FastForwardMergeAsync` counts the commits since the merge-base and only calls `SquashSinceAsync`
-if there's more than one; fast-forwarding an already-single commit needs no rewrite.
+- **Squash** collapses the commits the branch has that the other doesn't (`git log other..branch`) into
+  one, asking for the message (defaulting to the branch's last commit message), then force-pushes
+  that branch. It's done with `git commit-tree` + `git update-ref` (`IGitService.SquashBranchAsync`),
+  so it never touches the working tree - it works on a branch that isn't checked out, and with
+  pending changes. Refused with a message if the branch has no commits of its own.
+- **Rebase** first squashes the same way *if* the branch has more than one commit of its own (a rebase
+  can't offer a meaningful per-commit AI conflict-resolution loop otherwise - each attempt only gets
+  one shot at the whole diff), then rebases the branch onto the other's tip, resolving conflicts
+  automatically in the Generate tab (see below), then force-pushes the branch. Nothing is replayed if
+  the branch is already built on the other's tip. Git can only rebase in the working tree, so a branch
+  that isn't checked out is checked out for the duration (`WorkspaceVersioningService.RebaseAsync`
+  verifies that checkout actually took before running `git rebase`, so a blocked one can't rewrite
+  the wrong branch) and the original branch is checked back out afterward.
+- **Merge** does the Rebase steps first when they're needed - the source has more than one commit
+  (squashed to one), or isn't built on the target's tip - then fast-forwards the target to the source
+  (`FastForwardAsync`: checks the target out, `git merge --ff-only`) and pushes the target with a normal
+  push. The now-absorbed source branch is then deleted locally and on the remote
+  (`DeleteBranchEverywhereAsync`), which is why the target is always left checked out - git refuses to
+  delete the checked-out branch, and a merge started from the source's own checkout would otherwise
+  leave it stuck. A branch with nothing the target lacks is refused with a message; the source isn't
+  force-pushed along the way, since it's deleted at the end anyway.
+
+Rebase and Merge need a clean working tree (`EnsureCleanWorkingTreeAsync` shows a message otherwise) -
+they check branches out and rewrite history under it. No remote at all isn't a failure for any of
+the pushes (`PushBranchAsync` treats it as nothing to push). The squash boundary is always
+`git merge-base(branch, other)`, so history still shows the branch forking from the true common
+ancestor with its own commits collapsed to one.
 
 ## Actions - right-click a branch, commit, or tag in the History tab
 
@@ -307,8 +314,7 @@ section's own actions do.
 | Menu item | What it does |
 |---|---|
 | Checkout | `git checkout <branch>` (confirms discarding pending changes first) |
-| Merge Into Current | `git merge <this branch>` into whatever's checked out, then deletes this branch both locally and on the remote |
-| Rebase Current Onto This | `git rebase <this branch>` |
+| Squash / Rebase / Merge (each in both directions, six items) | see "Squash, Rebase, and Merge" above; only while a branch is checked out |
 | Delete | `git branch -D` |
 
 **Commit row:** Checkout (detaches HEAD there).
@@ -322,7 +328,7 @@ the changes view (see `HistoryTabView.OnEntryPointerPressed`, which checks
 
 ### AI-assisted conflict resolution
 
-The History tab's Merge/Rebase-onto-this items, the Version section's own Rebase, and
+The History tab's Rebase and Merge items (Merge only when it has to rebase first) and
 `PullWithStashIfNeededAsync`'s own stash-pop conflicts (see "Fetching" below) all share
 `VersionSectionViewModel.ResolveConflictsAsync`. If the initial attempt reports
 `GitOperationOutcome.Conflicts`, the loop (up to 3 attempts):
@@ -339,7 +345,7 @@ The History tab's Merge/Rebase-onto-this items, the Version section's own Rebase
    newly-pulled-commits conflict isn't "two branches" and the AI needs to know exactly which commits
    are newly pulled in (everything since the commit hash captured before the stash/pull began).
 4. Checks `HasConflictsAsync()` again; if still conflicted, retries (budget permitting); otherwise
-   calls whichever continuation the caller passed in (`ContinueRebaseAsync`/`ContinueMergeAsync`, or
+   calls whichever continuation the caller passed in (`ContinueRebaseAsync`, or
    for a stash-pop conflict - which has no git "continue" step of its own - a lambda that just
    confirms success).
 
@@ -348,18 +354,16 @@ stays set) so the user can watch/interact with the Generate tab while it works, 
 whatever it was *before the whole loop started* once it ends - `true` for Rebase/Merge (called from
 inside `RunBusyAsync`, which keeps its own busy overlay up for whatever git work is still left) and
 `false` for `PullWithStashIfNeededAsync` (called with no such overlay at all, so it stays overlay-free
-once conflict resolution finishes rather than getting stuck open). On success the branch is
-force-pushed (`MarkFailed` if that push itself fails - the rebase/merge already succeeded locally by
-that point; a merge only adds commits, so `MergeIntoCurrentAsync` uses a normal push rather than a
-forced one) - and, for `MergeIntoCurrentAsync` specifically, the now-merged source branch is then
-also deleted both locally and on the remote, same as a conflict-free merge; on exhausted attempts
-the operation is aborted (`AbortRebaseAsync`/`AbortMergeAsync`) and `MarkFailed` explains it
-couldn't be resolved automatically, keeping the busy overlay (and its log) up until the user
-confirms - see "The busy overlay" above. `PullWithStashIfNeededAsync` has no such overlay to keep
+once conflict resolution finishes rather than getting stuck open). On success the rebased branch is
+force-pushed by Rebase (`MarkFailed` if that push itself fails - the rebase already succeeded locally by
+that point), or carried on into Merge's fast-forward/push/cleanup; on exhausted attempts the rebase is
+aborted (`AbortRebaseAsync`) and `MarkFailed` explains it couldn't be resolved automatically, keeping
+the busy overlay (and its log) up until the user confirms - see "The busy overlay" above.
+`PullWithStashIfNeededAsync` has no such overlay to keep
 open on exhausted attempts either - it just leaves the popped stash's conflict markers in place,
-uncommitted, and the stash entry itself un-dropped, for the user to sort out by hand. The Version
-section's own Merge action never goes through this loop at all - a fast-forward either applies
-cleanly or fails outright, with no merge-conflict state to resolve.
+uncommitted, and the stash entry itself un-dropped, for the user to sort out by hand. Merge's own
+fast-forward never goes through this loop - it either applies cleanly or fails outright, with no
+conflict state to resolve; only the rebase before it can conflict.
 
 #### Generate tab display, and why Stop/Cancel are never offered
 

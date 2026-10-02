@@ -45,9 +45,13 @@
                 <ScrollViewer Name="Scroller" Grid.Row="1" IsVisible="{Binding !VisibleAutomatedTurnActive}">
                     <StackPanel Margin="14,10" Spacing="10" HorizontalAlignment="Stretch"
                                 IsVisible="{Binding DisplayedRequest, Converter={x:Static conv:ObjectConverters.IsNotNull}}">
-                        <!-- Request input. -->
+                        <!-- Request input - capped at 6 lines (measured empirically at this box's Padding/
+                             FontSize), scrolling internally past that so a long submitted input can't push the
+                             status/output below it far down the tab. -->
                         <Border Background="{DynamicResource HeaderBackgroundBrush}" CornerRadius="4" Padding="10,8">
-                            <SelectableTextBlock Text="{Binding DisplayedRequest.Input}" TextWrapping="Wrap" />
+                            <ScrollViewer MaxHeight="102" VerticalScrollBarVisibility="Auto">
+                                <SelectableTextBlock Text="{Binding DisplayedRequest.Input}" TextWrapping="Wrap" />
+                            </ScrollViewer>
                         </Border>
 
                         <!-- Status: Working/Cancelled/Completed - its own larger, centered block. -->
@@ -60,11 +64,16 @@
                                     <!-- LineHeight explicitly wider than FontSize - glyphs otherwise clip against
                                          Avalonia's auto-computed line box at this font size (not visible at the
                                          smaller size this text used to render at). -->
-                                    <TextBlock Text="{Binding DisplayedRequest.DisplayStatus}" FontSize="20" LineHeight="28"
-                                               TextWrapping="Wrap" TextAlignment="Center" MaxWidth="480"
-                                               HorizontalAlignment="Center"
-                                               Classes="requestStatus" Classes.working="{Binding DisplayedRequest.IsWorking}"
-                                               Classes.completed="{Binding DisplayedRequest.IsCompleted}" />
+                                    <!-- A long action (e.g. a whole shell command) is capped at a few lines and scrolls
+                                         instead of stretching the status card down the tab. -->
+                                    <ScrollViewer Name="StatusScroller" MaxWidth="480" MaxHeight="84" HorizontalAlignment="Center"
+                                                  HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                                        <TextBlock Text="{Binding DisplayedRequest.DisplayStatus}" FontSize="20" LineHeight="28"
+                                                   TextWrapping="Wrap" TextAlignment="Center"
+                                                   HorizontalAlignment="Center"
+                                                   Classes="requestStatus" Classes.working="{Binding DisplayedRequest.IsWorking}"
+                                                   Classes.completed="{Binding DisplayedRequest.IsCompleted}" />
+                                    </ScrollViewer>
                                     <!-- How long the AI has spent on the current action - see GenerateRequestViewModel.ElapsedDisplay. -->
                                     <TextBlock Text="{Binding DisplayedRequest.ElapsedDisplay}" FontSize="12"
                                                HorizontalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}"
@@ -108,10 +117,13 @@
                                     <TextBlock Text="●" FontSize="14" VerticalAlignment="Center"
                                                Classes="requestStatus" Classes.working="{Binding IsSending}"
                                                IsVisible="{Binding IsSending}" />
-                                    <TextBlock Text="{Binding AutomatedTurnStatusText}" FontSize="20" LineHeight="28"
-                                               TextWrapping="Wrap" TextAlignment="Center" MaxWidth="480"
-                                               HorizontalAlignment="Center"
-                                               Classes="requestStatus" Classes.working="{Binding IsSending}" />
+                                    <ScrollViewer MaxWidth="480" MaxHeight="84" HorizontalAlignment="Center"
+                                                  HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                                        <TextBlock Text="{Binding AutomatedTurnStatusText}" FontSize="20" LineHeight="28"
+                                                   TextWrapping="Wrap" TextAlignment="Center"
+                                                   HorizontalAlignment="Center"
+                                                   Classes="requestStatus" Classes.working="{Binding IsSending}" />
+                                    </ScrollViewer>
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
                                     <Button Content="Pause" Command="{Binding PauseCommand}"

@@ -45,27 +45,6 @@ public sealed class AvaloniaDialogService(ITemplateService templateService, IExt
         return await window.ShowDialog<bool>(OwnerWindow);
     }
 
-    public async Task<SquashDialogResult?> ShowSquashDialogAsync(IReadOnlyList<string> branches, Func<string, Task<string>> defaultMessageProvider)
-    {
-        SquashDialogViewModel vm = new SquashDialogViewModel(branches, defaultMessageProvider);
-        SquashDialogWindow window = new SquashDialogWindow { DataContext = vm };
-        return await window.ShowDialog<SquashDialogResult?>(OwnerWindow);
-    }
-
-    public async Task<RebaseDialogResult?> ShowRebaseDialogAsync(IReadOnlyList<string> branches, Func<string, Task<string>> defaultMessageProvider)
-    {
-        RebaseDialogViewModel vm = new RebaseDialogViewModel(branches, defaultMessageProvider);
-        RebaseDialogWindow window = new RebaseDialogWindow { DataContext = vm };
-        return await window.ShowDialog<RebaseDialogResult?>(OwnerWindow);
-    }
-
-    public async Task<MergeDialogResult?> ShowMergeDialogAsync(IReadOnlyList<string> branches, Func<string, Task<string>> defaultMessageProvider)
-    {
-        MergeDialogViewModel vm = new MergeDialogViewModel(branches, defaultMessageProvider);
-        MergeDialogWindow window = new MergeDialogWindow { DataContext = vm };
-        return await window.ShowDialog<MergeDialogResult?>(OwnerWindow);
-    }
-
     public async Task ShowMessageDialogAsync(string title, string message)
     {
         MessageDialogViewModel vm = new MessageDialogViewModel { Title = title, Message = message };

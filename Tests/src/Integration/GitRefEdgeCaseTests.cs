@@ -81,13 +81,21 @@ public sealed class GitRefEdgeCaseTests : IDisposable
     }
 
     [Fact]
-    public async Task SquashSinceAsync_CommitFails_LeavesTheBranchWhereItWas()
+    public async Task SquashBranchAsync_NothingSinceTheBase_LeavesTheBranchWhereItWas()
     {
         CommitFile("a.txt", "1", "one");
         string head = await git.RevParseAsync(repoPath, "HEAD");
+        string branch = (await git.GetCurrentBranchAsync(repoPath))!;
 
-        // Squashing onto HEAD itself leaves nothing to commit, so the commit step fails.
-        Assert.False(await git.SquashSinceAsync(repoPath, head, "squashed"));
+        Assert.False(await git.SquashBranchAsync(repoPath, branch, head, "squashed"));
         Assert.Equal(head, await git.RevParseAsync(repoPath, "HEAD"));
+    }
+
+    [Fact]
+    public async Task SquashBranchAsync_UnknownBranch_ReturnsFalse()
+    {
+        CommitFile("a.txt", "1", "one");
+
+        Assert.False(await git.SquashBranchAsync(repoPath, "no-such-branch", "HEAD", "squashed"));
     }
 }

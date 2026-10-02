@@ -11,10 +11,11 @@ namespace AutoDev.ViewModels.Content;
 
 /// <summary>
 /// A read-only branch/timeline browser, plus every git action that targets some other row instead of the
-/// currently checked-out branch itself (Commit/Reset/Branch/Tag/Remote/Squash/Rebase all live on the Version
-/// section instead - see VersionSectionViewModel) as a right-click context menu on a branch/commit/tag row -
-/// see BranchRows/TimelineEntries and the Checkout/MergeIntoCurrent/RebaseCurrentOnto/Delete/DeleteTag commands
-/// below. Every local branch is a flat row (current pinned first - see
+/// currently checked-out branch itself (Commit/Reset/Branch/Tag/Remote live on the Version section instead -
+/// see VersionSectionViewModel) as a right-click context menu on a branch/commit/tag row - see
+/// BranchRows/TimelineEntries and the Checkout/Squash/Rebase/Merge/Delete/DeleteTag commands below. Squash,
+/// Rebase, and Merge each come in two directions on a non-current branch's menu - operating on the current
+/// branch relative to the clicked one, or on the clicked one relative to the current. Every local branch is a flat row (current pinned first - see
 /// IWorkspaceVersioningService.ListAllBranchesAsync); the selected branch's own commit/tag history shows one
 /// page (100 entries) at a time, newest first. A Commit or Tag row's left-click expands in place to show that
 /// commit's changed files (right-click only opens its context menu - see HistoryTabView.OnEntryPointerPressed).
@@ -48,15 +49,19 @@ public sealed partial class HistoryTabViewModel : ViewModelBase
     /// <summary>Disables every mutating action in this tab while true - mirrors VersionSectionViewModel.IsInteractionBlocked, since every action here runs through _version.RunBusyAsync just like the old Version section's own buttons did.</summary>
     public bool IsInteractionBlocked => version.IsInteractionBlocked;
 
-    /// <summary>Shared CanExecute for every action command below (Checkout/MergeIntoCurrent/RebaseCurrentOnto/Delete/DeleteTag) - browsing the timeline itself (paging, expanding a commit's changes, selecting a branch) is pure local view state and stays interactive regardless, matching the old Version-section-vs-timeline split.</summary>
+    /// <summary>Shared CanExecute for every action command below (Checkout/Squash/Rebase/Merge/Delete/DeleteTag) - browsing the timeline itself (paging, expanding a commit's changes, selecting a branch) is pure local view state and stays interactive regardless, matching the old Version-section-vs-timeline split.</summary>
     private bool CanMutate() => !IsInteractionBlocked;
 
     private void NotifyMutatingCommandsCanExecuteChanged()
     {
         FetchCommand.NotifyCanExecuteChanged();
         CheckoutCommand.NotifyCanExecuteChanged();
-        MergeIntoCurrentCommand.NotifyCanExecuteChanged();
-        RebaseCurrentOntoCommand.NotifyCanExecuteChanged();
+        SquashCurrentCommand.NotifyCanExecuteChanged();
+        SquashSelectedCommand.NotifyCanExecuteChanged();
+        RebaseCurrentCommand.NotifyCanExecuteChanged();
+        RebaseSelectedCommand.NotifyCanExecuteChanged();
+        MergeCurrentCommand.NotifyCanExecuteChanged();
+        MergeSelectedCommand.NotifyCanExecuteChanged();
         DeleteBranchCommand.NotifyCanExecuteChanged();
         DeleteTagCommand.NotifyCanExecuteChanged();
     }
@@ -158,10 +163,11 @@ public sealed partial class HistoryTabViewModel : ViewModelBase
 
     private void RebuildBranchRows()
     {
+        string? currentBranchName = branches.FirstOrDefault(b => b.IsCurrent)?.Name;
         BranchRows.Clear();
         foreach (BranchSummary branch in branches)
         {
-            BranchRows.Add(new BranchRowViewModel(branch) { IsSelected = branch.Name == SelectedBranchName });
+            BranchRows.Add(new BranchRowViewModel(branch, currentBranchName) { IsSelected = branch.Name == SelectedBranchName });
         }
     }
 
@@ -301,66 +307,255 @@ public sealed partial class HistoryTabViewModel : ViewModelBase
         });
     }
 
-    /// <summary>Merges sourceBranch into whatever's currently checked out - offered on every non-current branch row. On success, sourceBranch (now fully absorbed into current) is deleted both locally and on the remote - unlike VersionSectionViewModel.MergeAsync's own fast-forward Merge, this never moves HEAD off the branch the user was already on, so sourceBranch is always safe to delete immediately.</summary>
+    /// <summary>Squashes the current branch's commits that aren't on selectedBranch into one - see SquashAsync.</summary>
     [RelayCommand(CanExecute = nameof(CanMutate))]
-    private async Task MergeIntoCurrentAsync(string sourceBranch)
+    private async Task SquashCurrentAsync(string selectedBranch)
     {
+        if (await GetCurrentBranchNameAsync() is { } current)
+        {
+            await SquashAsync(branch: current, baseBranch: selectedBranch);
+        }
+    }
+
+    /// <summary>Squashes selectedBranch's commits that aren't on the current branch into one - see SquashAsync.</summary>
+    [RelayCommand(CanExecute = nameof(CanMutate))]
+    private async Task SquashSelectedAsync(string selectedBranch)
+    {
+        if (await GetCurrentBranchNameAsync() is { } current)
+        {
+            await SquashAsync(branch: selectedBranch, baseBranch: current);
+        }
+    }
+
+    /// <summary>Rebases the current branch onto selectedBranch - see RebaseAsync.</summary>
+    [RelayCommand(CanExecute = nameof(CanMutate))]
+    private async Task RebaseCurrentAsync(string selectedBranch)
+    {
+        if (await GetCurrentBranchNameAsync() is { } current)
+        {
+            await RebaseAsync(branch: current, ontoBranch: selectedBranch);
+        }
+    }
+
+    /// <summary>Rebases selectedBranch onto the current branch - see RebaseAsync.</summary>
+    [RelayCommand(CanExecute = nameof(CanMutate))]
+    private async Task RebaseSelectedAsync(string selectedBranch)
+    {
+        if (await GetCurrentBranchNameAsync() is { } current)
+        {
+            await RebaseAsync(branch: selectedBranch, ontoBranch: current);
+        }
+    }
+
+    /// <summary>Merges the current branch into selectedBranch - see MergeAsync.</summary>
+    [RelayCommand(CanExecute = nameof(CanMutate))]
+    private async Task MergeCurrentAsync(string selectedBranch)
+    {
+        if (await GetCurrentBranchNameAsync() is { } current)
+        {
+            await MergeAsync(sourceBranch: current, targetBranch: selectedBranch);
+        }
+    }
+
+    /// <summary>Merges selectedBranch into the current branch - see MergeAsync.</summary>
+    [RelayCommand(CanExecute = nameof(CanMutate))]
+    private async Task MergeSelectedAsync(string selectedBranch)
+    {
+        if (await GetCurrentBranchNameAsync() is { } current)
+        {
+            await MergeAsync(sourceBranch: selectedBranch, targetBranch: current);
+        }
+    }
+
+    /// <summary>The checked-out branch, read fresh from git rather than from the (possibly a moment stale) branch list - null while HEAD is detached, where none of the branch-relative actions above apply.</summary>
+    private async Task<string?> GetCurrentBranchNameAsync() => (await versioningService.GetCurrentTargetAsync())?.BranchName;
+
+    /// <summary>
+    /// Collapses the commits `branch` has that `baseBranch` doesn't into one, using a message the user is
+    /// asked for (defaulting to `branch`'s last commit message), then force-pushes `branch`. Never touches the
+    /// working tree, so it works on any branch and with pending changes.
+    /// </summary>
+    private async Task SquashAsync(string branch, string baseBranch)
+    {
+        int commitCount = await versioningService.CountUniqueCommitsAsync(branch, baseBranch);
+        if (commitCount == 0)
+        {
+            await dialogService.ShowMessageDialogAsync("Squash", $"'{branch}' has no commits that aren't already on '{baseBranch}'.");
+            return;
+        }
+
+        if (await PromptSquashMessageAsync("Squash", branch, baseBranch, commitCount) is not { } message)
+        {
+            return;
+        }
+
         await version.RunBusyAsync(async ct =>
         {
-            GitOperationOutcome outcome = await versioningService.MergeAsync(sourceBranch, ct);
-            outcome = await version.ResolveConflictsAsync(outcome, ct2 => versioningService.ContinueMergeAsync(ct2), ct);
-            if (outcome == GitOperationOutcome.Succeeded)
+            SquashOutcome outcome = await versioningService.SquashAsync(branch, baseBranch, message, ct);
+            if (outcome == SquashOutcome.SquashFailed)
             {
-                // A merge only adds commits, so a normal push suffices - forcing it would overwrite anything
-                // pushed to this branch from elsewhere since the last fetch.
-                if (!await versioningService.PushCurrentBranchAsync(force: false, ct))
-                {
-                    version.MarkFailed("Merge succeeded locally, but pushing it to the remote failed.");
-                    return;
-                }
-
-                if (!await versioningService.DeleteBranchEverywhereAsync(sourceBranch, ct))
-                {
-                    version.MarkFailed($"Merged, but deleting '{sourceBranch}' on the remote failed.");
-                }
+                version.MarkFailed($"Squashing '{branch}' failed - it was left unchanged.");
             }
-            else if (outcome == GitOperationOutcome.Conflicts)
+            else if (outcome == SquashOutcome.PushFailed)
             {
-                await versioningService.AbortMergeAsync(ct);
-                version.MarkFailed("Could not automatically resolve the merge conflicts - aborted.");
-            }
-            else
-            {
-                version.MarkFailed("Merge failed.");
+                version.MarkFailed($"Squashed '{branch}' locally, but force-pushing it to the remote failed.");
             }
         });
     }
 
-    /// <summary>Rebases whatever's currently checked out onto ontoBranch - offered on every non-current branch row.</summary>
-    [RelayCommand(CanExecute = nameof(CanMutate))]
-    private async Task RebaseCurrentOntoAsync(string ontoBranch)
+    /// <summary>
+    /// Rebases `branch` onto `ontoBranch`'s tip - squashing `branch`'s own commits first if it has more than
+    /// one (asking for the message) - resolving merge conflicts automatically in the Generate tab, then
+    /// force-pushes `branch`. Git can only rebase in the working tree, so this needs it clean, and checks
+    /// `branch` out for the duration when it isn't the current branch, returning to the original branch after.
+    /// </summary>
+    private async Task RebaseAsync(string branch, string ontoBranch)
     {
+        if (!await EnsureCleanWorkingTreeAsync("Rebase"))
+        {
+            return;
+        }
+
+        int commitCount = await versioningService.CountUniqueCommitsAsync(branch, ontoBranch);
+        if (commitCount == 0 && await versioningService.IsBasedOnAsync(branch, ontoBranch))
+        {
+            await dialogService.ShowMessageDialogAsync("Rebase", $"'{branch}' is already up to date with '{ontoBranch}'.");
+            return;
+        }
+
+        string? squashMessage = null;
+        if (commitCount > 1)
+        {
+            squashMessage = await PromptSquashMessageAsync("Rebase", branch, ontoBranch, commitCount);
+            if (squashMessage is null)
+            {
+                return;
+            }
+        }
+
+        string? originalBranch = await GetCurrentBranchNameAsync();
         await version.RunBusyAsync(async ct =>
         {
-            GitOperationOutcome outcome = await versioningService.RebaseAsync(ontoBranch, ct);
-            outcome = await version.ResolveConflictsAsync(outcome, ct2 => versioningService.ContinueRebaseAsync(ct2), ct);
-            if (outcome == GitOperationOutcome.Succeeded)
+            if (await RebaseBranchAsync(branch, ontoBranch, squashMessage, ct)
+                && !await versioningService.PushBranchAsync(branch, force: true, ct))
             {
-                if (!await versioningService.PushCurrentBranchAsync(force: true, ct))
-                {
-                    version.MarkFailed("Rebase succeeded locally, but pushing it to the remote failed.");
-                }
+                version.MarkFailed($"Rebased '{branch}' locally, but force-pushing it to the remote failed.");
             }
-            else if (outcome == GitOperationOutcome.Conflicts)
+
+            await ReturnToBranchAsync(originalBranch, ct);
+        });
+    }
+
+    /// <summary>
+    /// Brings `sourceBranch` into `targetBranch` as a fast-forward: first rebases `sourceBranch` onto
+    /// `targetBranch` (squashing it to one commit if it has several, asking for the message) unless it's
+    /// already a single commit built on `targetBranch`'s tip, then moves `targetBranch` up to it and pushes
+    /// `targetBranch`. `sourceBranch`, now fully absorbed, is deleted locally and on the remote - which is why
+    /// `targetBranch` is always left checked out, even when the merge started from `sourceBranch`. Needs a
+    /// clean working tree, like Rebase.
+    /// </summary>
+    private async Task MergeAsync(string sourceBranch, string targetBranch)
+    {
+        if (!await EnsureCleanWorkingTreeAsync("Merge"))
+        {
+            return;
+        }
+
+        int commitCount = await versioningService.CountUniqueCommitsAsync(sourceBranch, targetBranch);
+        if (commitCount == 0)
+        {
+            await dialogService.ShowMessageDialogAsync("Merge", $"'{sourceBranch}' has no commits that aren't already on '{targetBranch}'.");
+            return;
+        }
+
+        bool needsRebase = !await versioningService.IsBasedOnAsync(sourceBranch, targetBranch);
+        string? squashMessage = null;
+        if (commitCount > 1)
+        {
+            squashMessage = await PromptSquashMessageAsync("Merge", sourceBranch, targetBranch, commitCount);
+            if (squashMessage is null)
             {
-                await versioningService.AbortRebaseAsync(ct);
-                version.MarkFailed("Could not automatically resolve the rebase conflicts - aborted.");
+                return;
             }
-            else
+        }
+
+        string? originalBranch = await GetCurrentBranchNameAsync();
+        await version.RunBusyAsync(async ct =>
+        {
+            if ((needsRebase || squashMessage is not null) && !await RebaseBranchAsync(sourceBranch, targetBranch, squashMessage, ct))
             {
-                version.MarkFailed("Rebase failed.");
+                await ReturnToBranchAsync(originalBranch, ct);
+                return;
+            }
+
+            if (!await versioningService.FastForwardAsync(targetBranch, sourceBranch, ct))
+            {
+                version.MarkFailed($"Couldn't fast-forward '{targetBranch}' to '{sourceBranch}' - pending changes may be blocking the switch to '{targetBranch}'.");
+                await ReturnToBranchAsync(originalBranch, ct);
+                return;
+            }
+
+            if (!await versioningService.PushBranchAsync(targetBranch, force: false, ct))
+            {
+                version.MarkFailed($"Merged into '{targetBranch}' locally, but pushing it to the remote failed.");
+                return;
+            }
+
+            if (!await versioningService.DeleteBranchEverywhereAsync(sourceBranch, ct))
+            {
+                version.MarkFailed($"Merged, but deleting '{sourceBranch}' on the remote failed.");
             }
         });
+    }
+
+    /// <summary>The shared rebase step of Rebase and Merge, run inside RunBusyAsync - rebases `branch` onto `ontoBranch` (squashing first if squashMessage isn't null) and hands any conflicts to the Generate tab to resolve, aborting the rebase if that can't. True if it finished; otherwise the failure has already been reported via MarkFailed.</summary>
+    private async Task<bool> RebaseBranchAsync(string branch, string ontoBranch, string? squashMessage, CancellationToken cancellationToken)
+    {
+        GitOperationOutcome outcome = await versioningService.RebaseAsync(branch, ontoBranch, squashMessage, cancellationToken);
+        outcome = await version.ResolveConflictsAsync(outcome, ct => versioningService.ContinueRebaseAsync(ct), cancellationToken);
+        if (outcome == GitOperationOutcome.Conflicts)
+        {
+            await versioningService.AbortRebaseAsync(cancellationToken);
+            version.MarkFailed($"Could not automatically resolve the conflicts rebasing '{branch}' onto '{ontoBranch}' - aborted.");
+        }
+        else if (outcome == GitOperationOutcome.Failed)
+        {
+            version.MarkFailed($"Rebasing '{branch}' onto '{ontoBranch}' failed.");
+        }
+
+        return outcome == GitOperationOutcome.Succeeded;
+    }
+
+    /// <summary>Puts the working tree back on the branch an action started from, after it had to check out another one (see RebaseAsync).</summary>
+    private async Task ReturnToBranchAsync(string? branch, CancellationToken cancellationToken)
+    {
+        if (branch is not null && await GetCurrentBranchNameAsync() != branch)
+        {
+            await versioningService.CheckoutRefAsync(branch, cancellationToken);
+        }
+    }
+
+    private async Task<bool> EnsureCleanWorkingTreeAsync(string actionName)
+    {
+        if (!await versioningService.HasUncommittedChangesAsync())
+        {
+            return true;
+        }
+
+        await dialogService.ShowMessageDialogAsync(actionName, "Commit or reset your pending changes first - this needs a clean working tree.");
+        return false;
+    }
+
+    /// <summary>Asks for the commit message of the single commit that will replace `branch`'s own commits that aren't on `baseBranch`, defaulting to `branch`'s last commit message. Null if cancelled or left blank.</summary>
+    private async Task<string?> PromptSquashMessageAsync(string actionName, string branch, string baseBranch, int commitCount)
+    {
+        string defaultMessage = await versioningService.GetDefaultSquashMessageAsync(branch);
+        string commits = commitCount == 1 ? "1 commit" : $"{commitCount} commits";
+        string? message = await dialogService.ShowInputDialogAsync(
+            $"{actionName} '{branch}'",
+            $"Message for the one commit replacing the {commits} on '{branch}' that aren't on '{baseBranch}'",
+            defaultMessage);
+        return string.IsNullOrWhiteSpace(message) ? null : message.Trim();
     }
 
     [RelayCommand(CanExecute = nameof(CanMutate))]
